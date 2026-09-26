@@ -106,8 +106,10 @@ final class AppModel {
 
     // MARK: Plumbing
 
-    let client = SteamClient()
+    let client: SteamClient
     let container: ModelContainer
+    /// Where settings and the last inventory check are saved. Tests pass their own suite.
+    let defaults: UserDefaults
     @ObservationIgnored var priceHistory: [String: [PricePoint]] = [:]
     @ObservationIgnored var inventoryRecords: [String: CachedInventory] = [:]
     @ObservationIgnored var priceRecords: [String: PriceRecord] = [:]
@@ -121,15 +123,17 @@ final class AppModel {
     static let settingsKey = "GaugeSettings"
     static let lastCheckKey = "GaugeLastInventoryCheck"
 
-    init(container: ModelContainer) {
+    init(container: ModelContainer, defaults: UserDefaults = .standard, client: SteamClient = SteamClient()) {
         self.container = container
-        if let data = UserDefaults.standard.data(forKey: Self.settingsKey),
+        self.defaults = defaults
+        self.client = client
+        if let data = defaults.data(forKey: Self.settingsKey),
            let saved = try? JSONDecoder().decode(AppSettings.self, from: data) {
             settings = saved
         } else {
             settings = AppSettings()
         }
-        lastInventoryCheck = UserDefaults.standard.object(forKey: Self.lastCheckKey) as? Date
+        lastInventoryCheck = defaults.object(forKey: Self.lastCheckKey) as? Date
     }
 
     var modelContext: ModelContext { container.mainContext }
@@ -160,6 +164,7 @@ final class AppModel {
     }
 
     func loadCache() async {
+        lastInventoryCheck = defaults.object(forKey: Self.lastCheckKey) as? Date
         let context = modelContext
         let inventories = (try? context.fetch(FetchDescriptor<CachedInventory>())) ?? []
         var loadedContexts: [InventoryContext] = []
@@ -228,7 +233,7 @@ final class AppModel {
         let previous = settings
         settings = updated
         if let data = try? JSONEncoder().encode(updated) {
-            UserDefaults.standard.set(data, forKey: Self.settingsKey)
+            defaults.set(data, forKey: Self.settingsKey)
         }
         if previous.currency != updated.currency {
             currencyChanged()
@@ -296,6 +301,11 @@ final class AppModel {
     func isStarred(_ item: InventoryItem) -> Bool { starred.contains(item.id) }
 
     func toggleStar(_ item: InventoryItem) {
+        guard !settings.demoMode else {
+            // Demo stars live in memory so they never mix with the real profile's.
+            if starred.contains(item.id) { starred.remove(item.id) } else { starred.insert(item.id) }
+            return
+        }
         let context = modelContext
         if starred.contains(item.id) {
             starred.remove(item.id)
@@ -342,11 +352,25 @@ final class AppModel {
         }
     }
 
+    /// Shows the demo inventory. The real profile's cache stays on disk untouched,
+    /// so leaving demo mode picks up exactly where it left off.
     func enterDemo() {
-        clearLocalData(keepSettings: true)
+        resetInMemoryState()
         updateSettings { $0.demoMode = true }
         started = true
+        tab = .portfolio
         loadDemo()
+    }
+
+    /// Leaves demo mode: back to the saved profile if there is one, otherwise to onboarding.
+    func exitDemo() async {
+        guard settings.demoMode else { return }
+        resetInMemoryState()
+        updateSettings { $0.demoMode = false }
+        tab = .portfolio
+        started = false
+        guard settings.profile != nil else { return }
+        await start()
     }
 
     /// Forgets the profile and everything cached for it.
@@ -362,10 +386,6 @@ final class AppModel {
 
     /// Deletes the inventory cache, prices, stars, snapshots and listing log.
     func clearLocalData(keepSettings: Bool) {
-        pricingTask?.cancel()
-        pricingTask = nil
-        schedulerTask?.cancel()
-        schedulerTask = nil
         let context = modelContext
         try? context.delete(model: CachedInventory.self)
         try? context.delete(model: PriceRecord.self)
@@ -373,6 +393,23 @@ final class AppModel {
         try? context.delete(model: StarredItem.self)
         try? context.delete(model: ListingRecord.self)
         try? context.save()
+        defaults.removeObject(forKey: Self.lastCheckKey)
+        resetInMemoryState()
+        if !keepSettings {
+            settings = AppSettings()
+            defaults.removeObject(forKey: Self.settingsKey)
+        }
+    }
+
+    /// Stops background work and forgets everything loaded in memory, leaving the cache on disk alone.
+    func resetInMemoryState() {
+        pricingTask?.cancel()
+        pricingTask = nil
+        pricingActive = false
+        schedulerTask?.cancel()
+        schedulerTask = nil
+        syncPhase = .idle
+        notice = nil
         inventoryRecords = [:]
         priceRecords = [:]
         priceHistory = [:]
@@ -387,15 +424,10 @@ final class AppModel {
         pricingQueue = []
         pricingPausedUntil = nil
         lastInventoryCheck = nil
-        UserDefaults.standard.removeObject(forKey: Self.lastCheckKey)
         browser.reset()
         cleanup.reset()
         rebuildDerived()
         recomputeTrends()
-        if !keepSettings {
-            settings = AppSettings()
-            UserDefaults.standard.removeObject(forKey: Self.settingsKey)
-        }
     }
 
     // MARK: - Demo
@@ -410,8 +442,7 @@ final class AppModel {
         })
         prices = demo.prices
         priceHistory = demo.history
-        let stars = (try? modelContext.fetch(FetchDescriptor<StarredItem>())) ?? []
-        starred = stars.isEmpty ? Set(demo.starred) : Set(stars.map(\.key))
+        starred = Set(demo.starred)
         snapshots = demo.snapshots.map { NetWorthPoint(day: $0.day, buyerCents: $0.buyerCents, sellerCents: $0.sellerCents) }
         lastInventoryCheck = now.addingTimeInterval(-3_600)
         pricingQueue = []

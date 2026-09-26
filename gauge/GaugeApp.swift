@@ -42,6 +42,13 @@ struct GaugeApp: App {
                     model.ensurePricing()
                 }
                 .disabled(model.settings.demoMode || model.settings.profile == nil)
+
+                Divider()
+
+                Button("Exit Demo Mode") {
+                    Task { await model.exitDemo() }
+                }
+                .disabled(!model.settings.demoMode)
             }
         }
 

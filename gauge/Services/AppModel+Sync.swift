@@ -60,6 +60,7 @@ extension AppModel {
 
         var refreshed: [InventoryContext] = []
         for context in directory {
+            if settings.demoMode { return }
             let cached = itemsByContext[context.id]
             let unchanged = cached != nil && self.context(for: context.id)?.assetCount == context.assetCount
             if !force && directoryIsComplete && unchanged {
@@ -71,9 +72,11 @@ extension AppModel {
                 let name = context.name
                 let items = try await client.inventory(steamID64: profile.steamID64, context: context) { loaded, total in
                     Task { @MainActor [weak self] in
-                        self?.syncPhase = .loading(name: name, loaded: loaded, total: total)
+                        guard let self, !self.settings.demoMode else { return }
+                        self.syncPhase = .loading(name: name, loaded: loaded, total: total)
                     }
                 }
+                if settings.demoMode { return }
                 guard !items.isEmpty || directoryIsComplete else { continue }
                 var updated = context
                 updated.assetCount = items.count
@@ -95,6 +98,7 @@ extension AppModel {
             }
         }
 
+        if settings.demoMode { return }
         if directoryIsComplete {
             removeInventories(notIn: Set(refreshed.map(\.id)))
         }
@@ -105,7 +109,7 @@ extension AppModel {
         contexts = merged.sorted { $0.assetCount > $1.assetCount }
 
         lastInventoryCheck = Date()
-        UserDefaults.standard.set(lastInventoryCheck, forKey: Self.lastCheckKey)
+        defaults.set(lastInventoryCheck, forKey: Self.lastCheckKey)
         syncPhase = .idle
         rebuildDerived()
         rebuildPricingQueue()
@@ -255,7 +259,7 @@ extension AppModel {
             }
             do {
                 let quote = try await client.priceOverview(appID: parts.appID, marketHashName: parts.marketHashName, currency: settings.currency)
-                guard !Task.isCancelled else { break }
+                guard !Task.isCancelled, !settings.demoMode else { break }
                 store(quote, for: key)
                 pricingPausedUntil = nil
                 sinceSnapshot += 1

@@ -62,6 +62,13 @@ struct HeaderBar: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(p.primary)
+                Button(model.settings.profile == nil ? "Exit demo" : "Exit demo · back to \(model.settings.profile?.personaName ?? "")") {
+                    Task { await model.exitDemo() }
+                }
+                .buttonStyle(.plain)
+                .font(p.font(11.5))
+                .foregroundStyle(p.accent)
+                .help("Leave demo mode and load your own Steam inventory")
             }
             Spacer()
             if let label = model.syncPhase.label {

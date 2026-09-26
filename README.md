@@ -13,7 +13,7 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 | **Clean up** | Three steps. First, set rules: keep sets, keep starred items, a pricing strategy, a price floor, "ask me about items worth $5 or more", and hold items that are rising. Second, review four buckets: **Sell**, **Floor items**, **Worth a look**, and **Keep**. Right-click any row to move it. Third, list the Sell bucket (plus floor items, if you choose) a few at a time. |
 | **Settings** | Classic, Classic Dark, and Modern themes (or follow macOS), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, CSV export, and clearing local data. |
 
-**Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2, and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
+**Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2, and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
 
 ## Build and run
 

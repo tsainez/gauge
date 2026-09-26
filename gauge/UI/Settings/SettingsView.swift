@@ -195,16 +195,27 @@ struct SettingsView: View {
             SectionLabel("Steam account", p)
             HStack {
                 if model.settings.demoMode {
-                    Text("Showing demo data. Nothing is sent to Steam.")
+                    if let profile = model.settings.profile {
+                        Text("Showing demo data. Nothing is sent to Steam. Exiting returns to \(profile.personaName).")
+                    } else {
+                        Text("Showing demo data. Nothing is sent to Steam.")
+                    }
                 } else if let profile = model.settings.profile {
                     Text("Profile: \(profile.personaName) · \(profile.steamID64)")
                         .textSelection(.enabled)
                 }
                 Spacer()
-                Button(model.settings.demoMode ? "Use my own profile…" : "Change profile…") {
-                    model.signOutOfProfile()
+                if model.settings.demoMode {
+                    Button(model.settings.profile == nil ? "Exit demo and add my profile" : "Exit demo") {
+                        Task { await model.exitDemo() }
+                    }
+                    .classicButton(.primary, p)
+                } else {
+                    Button("Change profile…") {
+                        model.signOutOfProfile()
+                    }
+                    .classicButton(.secondary, p)
                 }
-                .classicButton(.secondary, p)
             }
             if !model.settings.demoMode {
                 HStack {
