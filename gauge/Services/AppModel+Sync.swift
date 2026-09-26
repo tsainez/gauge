@@ -88,7 +88,8 @@ extension AppModel {
             } catch {
                 contextStatus[context.id, default: ContextStatus()].error = error.localizedDescription
                 if cached != nil { refreshed.append(context) }
-                if let failure = error as? SteamClient.Failure, failure == .privateInventory {
+                // While probing guessed games, a 403 just means there's nothing there.
+                if directoryIsComplete, let failure = error as? SteamClient.Failure, failure == .privateInventory {
                     notice = failure.localizedDescription
                 }
             }
