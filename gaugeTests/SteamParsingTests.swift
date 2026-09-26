@@ -166,6 +166,10 @@ struct MarketParsingTests {
         let failed = SellResponseParser.parse(Data(#"{"success":false,"message":"You already have a listing for this item pending confirmation."}"#.utf8))
         #expect(!failed.success)
         #expect(failed.message?.contains("pending confirmation") == true)
+
+        let expired = SellResponseParser.parse(Data("<html><body>Sign In</body></html>".utf8))
+        #expect(!expired.success)
+        #expect(expired.message?.contains("sign in again") == true)
     }
 
     @Test func encodesMarketHashNames() {

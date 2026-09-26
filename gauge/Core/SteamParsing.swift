@@ -239,8 +239,8 @@ nonisolated enum SellResponseParser {
     /// HTTP 502 and a JSON message, so the body is read regardless of status.
     static func parse(_ data: Data) -> SellResult {
         guard let dto = try? JSONDecoder().decode(SellItemDTO.self, from: data) else {
-            let text = String(decoding: data.prefix(300), as: UTF8.self)
-            return SellResult(success: false, needsConfirmation: false, message: text.isEmpty ? nil : text)
+            // An HTML page instead of JSON usually means the session expired.
+            return SellResult(success: false, needsConfirmation: false, message: "Steam sent back a web page instead of a result. Your sign-in may have expired; sign in again.")
         }
         return SellResult(
             success: dto.success,
