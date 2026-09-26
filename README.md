@@ -1,0 +1,80 @@
+# Gauge
+
+A macOS companion for the Steam Community Market. It shows what your marketable items are worth across every inventory, keeps a daily history of that value, and clears out years of drops by rule instead of one listing at a time.
+
+The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so the app never uses "Steam" in its own name.
+
+## What's in the MVP
+
+| Tab | What it does |
+| --- | --- |
+| **Portfolio** | Marketable net worth (what buyers pay, and what you'd receive after fees), a Week, Month, or Lifetime chart from daily snapshots, a per-game table, and saved views (Fluff, Complete sets, Price moved this week). |
+| **Inventory** | A grid like Steam's inventory page with filters built from Steam's own tags (rarity, quality, type, slot, hero, and so on), search, sort by value, rarity, name, or newest, stars, multi-select (⌘-click, ⇧-click), set ownership ("you own 3 of 5"), and a Sell sheet. |
+| **Clean up** | Three steps. First, set rules: keep sets, keep starred items, a pricing strategy, a price floor, "ask me about items worth $5 or more", and hold items that are rising. Second, review four buckets: **Sell**, **Floor items**, **Worth a look**, and **Keep**. Right-click any row to move it. Third, list the Sell bucket (plus floor items, if you choose) a few at a time. |
+| **Settings** | Classic, Classic Dark, and Modern themes (or follow macOS), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, CSV export, and clearing local data. |
+
+**Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2, and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
+
+## Build and run
+
+1. Open `gauge.xcodeproj` in Xcode 27. The project targets macOS 27.
+2. Run the `gauge` scheme.
+3. Paste your profile link (`steamcommunity.com/id/you`), custom URL name, or SteamID64. Your inventory must be public. You can also choose **Try the demo inventory**.
+4. Press ⌘U to run the unit tests.
+
+The app sandbox needs **Outgoing Connections (Client)**. It's turned on through `ENABLE_OUTGOING_NETWORK_CONNECTIONS` in the target's build settings. CSV export needs user-selected read/write file access (`ENABLE_USER_SELECTED_FILES = readwrite`).
+
+## How it stays fast: caching
+
+Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a minute per IP address, and inventory requests are limited further still. So the UI never waits on the network:
+
+- **Everything renders from local data.** On launch, `AppModel` loads the SwiftData cache (inventories, prices, stars, and snapshots) and the window shows it immediately. Background work refreshes the cache, and the UI updates as each result lands.
+- **Inventories are re-downloaded only when they change.** A check costs one request: the public inventory page lists every game with an item count. Gauge re-fetches a game's inventory only when its count changed, or when you choose Refresh (⌘R). Checks run on a timer; the default is every 6 hours.
+- **Prices come from a persistent queue.** Each unique market hash name is priced once (1,071 marketable items might be only a few hundred names). The queue prices never-priced items first, rarest first, then stale valuable items, then stale fluff. Valuable items refresh daily and fluff weekly, and both intervals are adjustable. The queue is rebuilt from the cache on every launch, so it picks up where it left off. The status bar shows how many items remain.
+- **Every endpoint has its own spacing.** `SteamClient` is an actor. It spaces requests per endpoint family (market, inventory, profile, sell) and backs off from 60 seconds up to 10 minutes after a 429.
+- **Item images** load through `AsyncImage` into a 512 MB `URLCache` on disk.
+- **Daily snapshots** of net worth are upserted as prices arrive and stored per currency. They draw the Portfolio chart.
+
+## Selling, and why it's safe
+
+Listing needs a signed-in Steam web session. Gauge never sees your password. You sign in on steamcommunity.com inside a web view, and Gauge reads the session cookie Steam sets from WebKit's cookie store, which stays in the app's sandbox on your Mac.
+
+- Every listing still has to be confirmed in the **Steam Mobile app**. Nothing sells without your approval there.
+- Starred items are never listed (Settings → Protect starred items).
+- Before listing, any price older than 6 hours is re-checked. An item is skipped if its price fell by more than half.
+- Listing stops at the first sign-in or rate-limit problem, and you can resume it.
+- Gauge refuses to list if the signed-in Steam account isn't the profile being shown.
+- Steam receives the amount *you* get after fees (the `price` field of `/market/sellitem`). The fee math is a direct port of Steam's own and is covered by tests.
+
+## Code map
+
+```
+gauge/
+  Core/          Foundation-only logic, unit tested
+    Money.swift            currencies, formatting, price-string parsing
+    SteamFees.swift        port of Steam's fee calculation
+    SteamProfile.swift     profile links / SteamID64 / vanity parsing, profile XML
+    InventoryItem.swift    the in-memory item model
+    SteamParsing.swift     inventory pages, the inventory directory, priceoverview, sellitem, sets
+    InventoryQuery.swift   Inventory tab filtering, sorting, tag facets
+    Cleanup.swift          clean-up rules → buckets, valuation, price trends
+    AppSettings.swift      settings (decode with defaults)
+    DemoData.swift         deterministic demo inventory
+  Steam/
+    SteamClient.swift      rate-limited actor for every steamcommunity.com request
+    SteamWebSession.swift  signed-in session for selling (WebKit cookies)
+  Persistence/Models.swift SwiftData cache
+  Services/                AppModel (state, sync, pricing queue, snapshots, selling), UI sessions
+  UI/                      SwiftUI: theme, components, one folder per tab
+gaugeTests/                Swift Testing: fees, parsing, rules, queries, settings, client with a mock server
+```
+
+## What was verified, and what wasn't
+
+This MVP was written in an environment without Xcode or network access to Steam. Specifically:
+
+- `Core/` and `SteamClient` were compiled with Swift 6.2 using the project's settings (MainActor default isolation, approachable concurrency), and the test suite passed: 51 tests, including a mock-server test of pagination, 429 back-off, and the sell request.
+- The services and UI layers were type-checked against stand-ins for SwiftData, SwiftUI, Charts, and WebKit. That catches mistakes in Gauge's own code, not every mismatch with Apple's frameworks. **Expect to fix a few compile errors on the first Xcode build.**
+- Steam response formats come from how the endpoints are known to behave, but they haven't been checked against live responses yet. The most uncertain piece is set detection, which reads the set list from an item's description. See TODO.md.
+
+Not affiliated with or endorsed by Valve Corporation.
