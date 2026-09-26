@@ -6,6 +6,7 @@
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import SwiftData
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
