@@ -19,6 +19,8 @@ nonisolated struct SteamWebAuth: Sendable {
     var steamID64: String
     var sessionID: String
     var steamLoginSecure: String
+
+    var cookieHeader: String { "sessionid=\(sessionID); steamLoginSecure=\(steamLoginSecure)" }
 }
 
 nonisolated struct SellRequest: Sendable {
@@ -44,7 +46,7 @@ actor SteamClient {
             case .rateLimited(let wait):
                 "Steam asked Gauge to slow down. Trying again in \(Int(wait / 60) + 1) min."
             case .privateInventory:
-                "This inventory is private. Set Inventory to Public in Steam's privacy settings."
+                "This inventory is private. Sign in with Steam as its owner, or set Inventory to Public in Steam's privacy settings."
             case .profileNotFound(let message):
                 message
             case .http(let code):
@@ -113,10 +115,12 @@ actor SteamClient {
         }
     }
 
-    /// Lists the games the profile has items for, read from the public inventory page.
-    func inventoryDirectory(steamID64: String) async throws -> [InventoryContext] {
-        let url = URL(string: "https://steamcommunity.com/profiles/\(steamID64)/inventory/")!
-        let data = try await send(URLRequest(url: url), endpoint: .profile)
+    /// Lists the games the profile has items for, read from its inventory page.
+    /// With the owner's `auth`, this works for a private inventory too, as it does in a browser.
+    func inventoryDirectory(steamID64: String, auth: SteamWebAuth? = nil) async throws -> [InventoryContext] {
+        var request = URLRequest(url: URL(string: "https://steamcommunity.com/profiles/\(steamID64)/inventory/")!)
+        Self.signIn(&request, auth)
+        let data = try await send(request, endpoint: .profile)
         guard let contexts = InventoryDirectoryParser.contexts(fromInventoryPage: String(decoding: data, as: UTF8.self)) else {
             throw Failure.unreadable
         }
@@ -124,9 +128,11 @@ actor SteamClient {
     }
 
     /// Downloads a whole inventory, page by page. `progress` receives (loaded, total).
+    /// With the owner's `auth`, this works for a private inventory too.
     func inventory(
         steamID64: String,
         context: InventoryContext,
+        auth: SteamWebAuth? = nil,
         progress: @Sendable (Int, Int?) -> Void = { _, _ in }
     ) async throws -> [InventoryItem] {
         var items: [InventoryItem] = []
@@ -139,6 +145,7 @@ actor SteamClient {
             components.queryItems = query
             var request = URLRequest(url: components.url!)
             request.setValue("https://steamcommunity.com/profiles/\(steamID64)/inventory/", forHTTPHeaderField: "Referer")
+            Self.signIn(&request, auth)
 
             let data: Data
             do {
@@ -177,11 +184,10 @@ actor SteamClient {
     func sell(_ sell: SellRequest, auth: SteamWebAuth) async throws -> SellResult {
         var request = URLRequest(url: URL(string: "https://steamcommunity.com/market/sellitem/")!)
         request.httpMethod = "POST"
-        request.httpShouldHandleCookies = false
+        Self.signIn(&request, auth)
         request.setValue("application/x-www-form-urlencoded; charset=UTF-8", forHTTPHeaderField: "Content-Type")
         request.setValue("https://steamcommunity.com", forHTTPHeaderField: "Origin")
         request.setValue("https://steamcommunity.com/profiles/\(auth.steamID64)/inventory/", forHTTPHeaderField: "Referer")
-        request.setValue("sessionid=\(auth.sessionID); steamLoginSecure=\(auth.steamLoginSecure)", forHTTPHeaderField: "Cookie")
         let form = [
             ("sessionid", auth.sessionID),
             ("appid", String(sell.appID)),
@@ -202,6 +208,13 @@ actor SteamClient {
     }
 
     // MARK: - Transport
+
+    /// Sends the web session's cookies with one request. The session itself never stores cookies.
+    private static func signIn(_ request: inout URLRequest, _ auth: SteamWebAuth?) {
+        guard let auth else { return }
+        request.httpShouldHandleCookies = false
+        request.setValue(auth.cookieHeader, forHTTPHeaderField: "Cookie")
+    }
 
     private func send(_ request: URLRequest, endpoint: Endpoint, acceptErrorBodies: Bool = false) async throws -> Data {
         let wait = reserveSlot(endpoint)

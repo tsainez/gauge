@@ -84,7 +84,7 @@ struct SellSheet: View {
         .foregroundStyle(p.text)
         .font(p.font(12.5))
         .sheet(isPresented: $showingSignIn) {
-            SteamSignInSheet().environment(model)
+            SteamSignInSheet(purpose: .listing).environment(model)
         }
         .onAppear {
             strategy = model.settings.cleanupRules.pricing
@@ -175,16 +175,25 @@ struct SignInStatus: View {
                 Text("Demo mode: listings are simulated only up to this point.")
                     .foregroundStyle(p.secondaryText)
             } else if model.web.isSignedIn {
-                Text("Signed in to Steam for selling")
+                Text("Signed in with Steam")
                     .foregroundStyle(p.secondaryText)
+            } else if model.web.status.hasExpired {
+                Text("Your Steam sign-in ran out. Sign in again to list items.")
+                    .foregroundStyle(p.negative)
             } else {
-                Text("Sign in to Steam to list items. Browsing and prices don't need it.")
+                Text("Sign in with Steam to list items. Browsing and prices don't need it.")
                     .foregroundStyle(p.secondaryText)
             }
             Spacer()
             if !model.settings.demoMode {
-                Button(model.web.isSignedIn ? "Switch account…" : "Sign in…") { showingSignIn = true }
-                    .classicButton(.secondary, p)
+                Button(model.web.isSignedIn ? "Switch account…" : "Sign in…") {
+                    Task {
+                        // Steam's page skips the form while a session exists, so end it first.
+                        if model.web.isSignedIn { await model.web.signOut() }
+                        showingSignIn = true
+                    }
+                }
+                .classicButton(.secondary, p)
             }
         }
         .font(p.font(12))

@@ -10,6 +10,7 @@ struct OnboardingView: View {
     @State private var input = ""
     @State private var error: String?
     @State private var working = false
+    @State private var showingSignIn = false
 
     var body: some View {
         let p = model.palette
@@ -21,22 +22,24 @@ struct OnboardingView: View {
                 .foregroundStyle(p.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
+            signIn(p)
+                .padding(.top, 6)
+
             VStack(alignment: .leading, spacing: 6) {
-                Text("Your Steam profile")
+                Text("Or look up a public profile without signing in")
                 HStack(spacing: 8) {
                     TextField("Profile link, custom URL, or SteamID64", text: $input)
                         .classicField(p)
-                        .onSubmit(connect)
+                        .onSubmit(lookUp)
                         .disabled(working)
-                    Button(working ? "Loading…" : "Load inventory", action: connect)
-                        .classicButton(.primary, p)
+                    Button("Load inventory", action: lookUp)
+                        .classicButton(.secondary, p)
                         .disabled(working || input.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                Text("For example steamcommunity.com/id/yourname or 76561198000000000")
+                Text("For example steamcommunity.com/id/yourname or 76561198000000000. The inventory has to be public.")
                     .font(p.font(11))
                     .foregroundStyle(p.mutedText)
             }
-            .padding(.top, 6)
 
             if working, let label = model.syncPhase.label {
                 HStack(spacing: 8) {
@@ -50,11 +53,12 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Your inventory needs to be public. Gauge reads the same public pages your browser shows, keeps everything on this Mac, and never asks for your Steam password or an API key to show your net worth.")
+            Text("Gauge keeps your inventory, prices, and history on this Mac. It never sees your Steam password and doesn't need an API key.")
                 .font(p.font(11.5))
                 .foregroundStyle(p.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .classicInset(p)
 
             HStack {
@@ -70,15 +74,64 @@ struct OnboardingView: View {
         .padding(28)
         .frame(width: 560)
         .classicPanel(p)
+        .sheet(isPresented: $showingSignIn) {
+            SteamSignInSheet(purpose: .account) { _ in connectSignedIn() }
+                .environment(model)
+        }
+        .task { await model.web.refresh(renewIfNeeded: false) }
     }
 
-    private func connect() {
+    @ViewBuilder
+    private func signIn(_ p: Palette) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let steamID = model.web.signedInSteamID {
+                // Still signed in from before, for example after Change profile.
+                HStack(spacing: 8) {
+                    Button(working ? "Loading…" : "Continue with your Steam account", action: connectSignedIn)
+                        .classicButton(.primary, p)
+                        .disabled(working)
+                    Button("Use a different account") {
+                        Task {
+                            await model.web.signOut()
+                            showingSignIn = true
+                        }
+                    }
+                    .classicButton(.secondary, p)
+                    .disabled(working)
+                }
+                Text("Signed in to Steam as \(steamID)")
+                    .font(p.font(11))
+                    .foregroundStyle(p.mutedText)
+                    .textSelection(.enabled)
+            } else {
+                Button(working ? "Loading…" : "Sign in with Steam") { showingSignIn = true }
+                    .classicButton(.primary, p)
+                    .disabled(working)
+                Text("On Steam's own page, with your password or the QR code in the Steam Mobile app. Signing in lets Gauge read your inventory even when it's private, and list items when you clean up.")
+                    .font(p.font(11))
+                    .foregroundStyle(p.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func connectSignedIn() {
+        run { await model.connectSignedInAccount() }
+    }
+
+    private func lookUp() {
         let text = input
-        guard !working, !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        run { await model.connect(to: text) }
+    }
+
+    /// Runs one connect attempt at a time and shows its error, if any.
+    private func run(_ attempt: @escaping () async -> String?) {
+        guard !working else { return }
         working = true
         error = nil
         Task {
-            error = await model.connect(to: text)
+            error = await attempt()
             working = false
         }
     }

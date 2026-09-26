@@ -19,7 +19,7 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 
 1. Open `gauge.xcodeproj` in Xcode 27. The project targets macOS 27.
 2. Run the `gauge` scheme.
-3. Paste your profile link (`steamcommunity.com/id/you`), custom URL name, or SteamID64. Your inventory must be public. You can also choose **Try the demo inventory**.
+3. Choose **Sign in with Steam** and sign in on Steam's own page, with your password or the QR code in the Steam Mobile app. Gauge loads the account you signed in with, even if its inventory is private. You can instead paste a public profile link (`steamcommunity.com/id/you`), custom URL name, or SteamID64 without signing in, or choose **Try the demo inventory**.
 4. Press ⌘U to run the unit tests.
 
 The app sandbox needs **Outgoing Connections (Client)**. It's turned on through `ENABLE_OUTGOING_NETWORK_CONNECTIONS` in the target's build settings. CSV export needs user-selected read/write file access (`ENABLE_USER_SELECTED_FILES = readwrite`).
@@ -35,9 +35,17 @@ Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a 
 - **Item images** load through `AsyncImage` into a 512 MB `URLCache` on disk.
 - **Daily snapshots** of net worth are upserted as prices arrive and stored per currency. They draw the Portfolio chart.
 
-## Selling, and why it's safe
+## Signing in with Steam
 
-Listing needs a signed-in Steam web session. Gauge never sees your password. You sign in on steamcommunity.com inside a web view, and Gauge reads the session cookie Steam sets from WebKit's cookie store, which stays in the app's sandbox on your Mac.
+Gauge never sees your password. **Sign in with Steam** opens Steam's own sign-in page (steamcommunity.com) in a sheet, where you use your password or scan the QR code with the Steam Mobile app. Steam Guard works as it does in a browser. Gauge then reads the session cookie Steam sets (`steamLoginSecure`) from WebKit's cookie store, which stays in the app's sandbox on your Mac. That one session:
+
+- **Identifies you.** The cookie names your SteamID64, so there's no profile link to paste.
+- **Reads a private inventory.** Inventory requests for your own profile carry your session, the way Steam's inventory page does for its owner. Other people's profiles are always read anonymously.
+- **Lists items** from Clean up and the Sell sheet.
+
+The sheet shows the page's real address, and only Steam's sign-in pages open in it; any other link opens in your browser. Steam's session cookie is a short-lived token (about a day) whose expiry Gauge reads from the token itself. When it's close to running out, Gauge loads a steamcommunity.com page off screen, and Steam swaps the long-lived refresh cookie it keeps on login.steampowered.com for a new session, as it does in a browser. If that fails, Settings and Clean up ask you to sign in again. **Sign out of Steam** in Settings deletes all of it. Signing in isn't required: a public profile works without it, and only listing needs it.
+
+## Selling, and why it's safe
 
 - Every listing still has to be confirmed in the **Steam Mobile app**. Nothing sells without your approval there.
 - Starred items are never listed (Settings → Protect starred items).
@@ -54,6 +62,7 @@ gauge/
     Money.swift            currencies, formatting, price-string parsing
     SteamFees.swift        port of Steam's fee calculation
     SteamProfile.swift     profile links / SteamID64 / vanity parsing, profile XML
+    SteamLogin.swift       the sign-in cookie: account, expiry, which pages the sign-in sheet keeps
     InventoryItem.swift    the in-memory item model
     SteamParsing.swift     inventory pages, the inventory directory, priceoverview, sellitem, sets
     InventoryQuery.swift   Inventory tab filtering, sorting, tag facets
@@ -62,7 +71,7 @@ gauge/
     DemoData.swift         deterministic demo inventory
   Steam/
     SteamClient.swift      rate-limited actor for every steamcommunity.com request
-    SteamWebSession.swift  signed-in session for selling (WebKit cookies)
+    SteamWebSession.swift  Sign in with Steam: WebKit cookies, status, renewal
   Persistence/Models.swift SwiftData cache
   Services/                AppModel (state, sync, pricing queue, snapshots, selling), UI sessions
   UI/                      SwiftUI: theme, components, one folder per tab
@@ -76,5 +85,6 @@ This MVP was written in an environment without Xcode or network access to Steam.
 - `Core/` and `SteamClient` were compiled with Swift 6.2 using the project's settings (MainActor default isolation, approachable concurrency), and the test suite passed: 51 tests, including a mock-server test of pagination, 429 back-off, and the sell request.
 - The services and UI layers were type-checked against stand-ins for SwiftData, SwiftUI, Charts, and WebKit. That catches mistakes in Gauge's own code, not every mismatch with Apple's frameworks. **Expect to fix a few compile errors on the first Xcode build.**
 - Steam response formats come from how the endpoints are known to behave, but they haven't been checked against live responses yet. The most uncertain piece is set detection, which reads the set list from an item's description. See TODO.md.
+- Signing in follows how Steam's web sign-in is known to work: the `steamLoginSecure` cookie format, its JWT expiry, and renewal through the refresh cookie. The parsing is unit tested; the flow itself hasn't been run against Steam yet.
 
 Not affiliated with or endorsed by Valve Corporation.

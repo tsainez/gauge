@@ -2,45 +2,78 @@
 //  SteamWebSession.swift
 //  gauge
 //
-//  Selling needs a signed-in steamcommunity.com session. Gauge never sees
-//  the user's password: they sign in on Steam's own page in a web view, and
-//  Gauge reads the resulting session cookies from WebKit's cookie store,
-//  which keeps them in the app's sandbox. Signing out deletes them.
+//  Signing in with Steam. Gauge never sees the user's password: they sign
+//  in on Steam's own page in a web view (with their password or the Steam
+//  Mobile app's QR code), and Gauge reads the session cookie Steam sets from
+//  WebKit's cookie store, which keeps it in the app's sandbox. The same
+//  session tells Gauge whose profile to show, lets it read that account's
+//  inventory even when it's private, and lists items. Signing out deletes it.
+//
+//  Steam's session cookie lasts about a day. Steam also keeps a long-lived
+//  refresh cookie on login.steampowered.com, and its pages trade that for a
+//  new session when the old one runs out, so renewing is just loading a
+//  steamcommunity.com page in an off-screen web view.
 //
 
+import AppKit
 import Foundation
 import Observation
 import WebKit
 
 @Observable
 final class SteamWebSession {
-    /// The SteamID64 the web session belongs to, if signed in.
-    private(set) var signedInSteamID: String?
-    private(set) var lastChecked: Date?
+    private(set) var status: SteamSignInStatus = .unknown
+    private(set) var isRenewing = false
+
+    @ObservationIgnored private var loginCookie: String?
+    @ObservationIgnored private var lastRenewalAttempt: Date?
+    @ObservationIgnored private var renewal: Task<SteamLoginToken?, Never>?
 
     static let loginURL = URL(string: "https://steamcommunity.com/login/home/?goto=")!
+    static let renewalURL = URL(string: "https://steamcommunity.com/my/")!
+    /// Don't retry a failed renewal more often than this.
+    static let renewalRetryInterval: TimeInterval = 5 * 60
 
+    /// The account with a working session, if any.
+    var signedInSteamID: String? { status.signedInSteamID }
     var isSignedIn: Bool { signedInSteamID != nil }
 
-    /// Re-reads the cookie store.
-    func refresh() async {
-        let cookies = await steamCookies()
-        signedInSteamID = cookies.first { $0.name == "steamLoginSecure" }.flatMap { Self.steamID(fromLoginCookie: $0.value) }
-        lastChecked = Date()
+    /// The web views Gauge shows Steam in. They share WebKit's persistent store,
+    /// which is what keeps the refresh cookie between launches.
+    static func webViewConfiguration() -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = WKWebsiteDataStore.default()
+        return configuration
     }
 
-    /// Credentials for one selling session, or nil when signed out.
-    func auth() async -> SteamWebAuth? {
-        let cookies = await steamCookies()
-        guard let login = cookies.first(where: { $0.name == "steamLoginSecure" }),
-              let steamID = Self.steamID(fromLoginCookie: login.value)
-        else {
-            signedInSteamID = nil
-            return nil
+    /// Re-reads the cookie store. With `renewIfNeeded`, a session that has run out
+    /// (or is about to) is renewed first.
+    func refresh(renewIfNeeded: Bool = true) async {
+        var token = await readToken()
+        if renewIfNeeded, let current = token, current.needsRenewal() {
+            if let renewal {
+                // Someone else is already renewing; wait for theirs.
+                token = await renewal.value
+            } else if lastRenewalAttempt.map({ Date().timeIntervalSince($0) >= Self.renewalRetryInterval }) ?? true {
+                lastRenewalAttempt = Date()
+                let task = Task { await self.renew(current) }
+                renewal = task
+                token = await task.value
+                renewal = nil
+            }
         }
-        signedInSteamID = steamID
+        // The sign-in sheet checks every second; only tell observers about real changes.
+        let updated = SteamSignInStatus(token: token)
+        if updated != status { status = updated }
+    }
+
+    /// Credentials for signed-in requests, renewing the session first if it needs it.
+    /// Nil when signed out or when the session couldn't be renewed.
+    func auth() async -> SteamWebAuth? {
+        await refresh()
+        guard let steamID = status.signedInSteamID, let login = loginCookie else { return nil }
         let sessionID: String
-        if let existing = cookies.first(where: { $0.name == "sessionid" })?.value, !existing.isEmpty {
+        if let existing = await steamCookies().first(where: { $0.name == "sessionid" })?.value, !existing.isEmpty {
             sessionID = existing
         } else {
             // Steam's CSRF check only needs the cookie and the form field to match.
@@ -59,10 +92,11 @@ final class SteamWebSession {
                 }
             }
         }
-        return SteamWebAuth(steamID64: steamID, sessionID: sessionID, steamLoginSecure: login.value)
+        return SteamWebAuth(steamID64: steamID, sessionID: sessionID, steamLoginSecure: login)
     }
 
-    /// Clears the web view's cookies and storage. Steam is the only site Gauge's web view visits.
+    /// Clears the web view's cookies and storage, including Steam's refresh cookie.
+    /// Steam is the only site Gauge's web views visit.
     func signOut() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             WKWebsiteDataStore.default().removeData(
@@ -72,7 +106,38 @@ final class SteamWebSession {
                 continuation.resume()
             }
         }
-        signedInSteamID = nil
+        loginCookie = nil
+        lastRenewalAttempt = nil
+        status = .signedOut
+    }
+
+    // MARK: - Private
+
+    private func readToken() async -> SteamLoginToken? {
+        let value = await steamCookies().first { $0.name == "steamLoginSecure" }?.value
+        loginCookie = value
+        return value.flatMap { SteamLoginToken(cookieValue: $0) }
+    }
+
+    /// Loads a steamcommunity.com page off screen and waits for Steam to replace the
+    /// session cookie. Returns whatever session cookie is there when it's done.
+    private func renew(_ current: SteamLoginToken, timeout: TimeInterval = 20) async -> SteamLoginToken? {
+        isRenewing = true
+        defer { isRenewing = false }
+
+        let webView = WKWebView(frame: .zero, configuration: Self.webViewConfiguration())
+        webView.load(URLRequest(url: Self.renewalURL))
+        defer { webView.stopLoading() }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            // The cookie can briefly disappear while Steam redirects, so keep waiting on nil.
+            if let token = await readToken(),
+               token.steamID64 != current.steamID64 || (token.expiresAt ?? .distantPast) > (current.expiresAt ?? .distantPast) {
+                return token
+            }
+        }
+        return await readToken()
     }
 
     private func steamCookies() async -> [HTTPCookie] {
@@ -82,14 +147,6 @@ final class SteamWebSession {
             }
         }
         return all.filter { $0.domain.hasSuffix("steamcommunity.com") }
-    }
-
-    /// `steamLoginSecure` is "<steamid64>||<token>", URL-encoded.
-    nonisolated static func steamID(fromLoginCookie value: String) -> String? {
-        let decoded = value.removingPercentEncoding ?? value
-        guard let separator = decoded.range(of: "||") else { return nil }
-        let id = String(decoded[..<separator.lowerBound])
-        return ProfileReference.isSteamID64(id) ? id : nil
     }
 
     nonisolated static func randomSessionID() -> String {

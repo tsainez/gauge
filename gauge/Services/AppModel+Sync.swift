@@ -43,11 +43,12 @@ extension AppModel {
         guard let profile = settings.profile, !settings.demoMode, !syncPhase.isBusy else { return }
         notice = nil
         syncPhase = .discovering
+        let auth = await ownerAuth(for: profile)
 
         var directory: [InventoryContext]
         var directoryIsComplete = true
         do {
-            directory = try await client.inventoryDirectory(steamID64: profile.steamID64)
+            directory = try await client.inventoryDirectory(steamID64: profile.steamID64, auth: auth)
         } catch SteamClient.Failure.rateLimited(let wait) {
             syncPhase = .idle
             notice = SteamClient.Failure.rateLimited(retryAfter: wait).errorDescription
@@ -70,7 +71,7 @@ extension AppModel {
             syncPhase = .loading(name: context.name, loaded: 0, total: context.assetCount > 0 ? context.assetCount : nil)
             do {
                 let name = context.name
-                let items = try await client.inventory(steamID64: profile.steamID64, context: context) { loaded, total in
+                let items = try await client.inventory(steamID64: profile.steamID64, context: context, auth: auth) { loaded, total in
                     Task { @MainActor [weak self] in
                         guard let self, !self.settings.demoMode else { return }
                         self.syncPhase = .loading(name: name, loaded: loaded, total: total)
@@ -93,7 +94,9 @@ extension AppModel {
                 if cached != nil { refreshed.append(context) }
                 // While probing guessed games, a 403 just means there's nothing there.
                 if directoryIsComplete, let failure = error as? SteamClient.Failure, failure == .privateInventory {
-                    notice = failure.localizedDescription
+                    notice = auth == nil
+                        ? failure.localizedDescription
+                        : "Steam wouldn't show \(context.name) even with your sign-in. Try signing in again from Settings."
                 }
             }
         }
@@ -115,6 +118,15 @@ extension AppModel {
         rebuildPricingQueue()
         ensurePricing()
         recordSnapshot()
+    }
+
+    /// The Steam session, when it belongs to the profile being shown. Sent with inventory
+    /// requests, it lets Gauge read that profile's inventory even when it's private,
+    /// the same way Steam's own inventory page does for its owner.
+    func ownerAuth(for profile: ProfileSummary) async -> SteamWebAuth? {
+        guard web.status.steamID64 == profile.steamID64 else { return nil }
+        let auth = await web.auth()
+        return auth?.steamID64 == profile.steamID64 ? auth : nil
     }
 
     /// Replaces one inventory in memory and in the cache.
