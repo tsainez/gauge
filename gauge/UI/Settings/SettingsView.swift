@@ -69,15 +69,15 @@ struct SettingsView: View {
                 .foregroundStyle(p.secondaryText)
             Spacer()
             HStack {
-                Button("Steam privacy settings") {
-                    openURL(URL(string: "https://steamcommunity.com/my/edit/settings")!)
-                }
-                .classicButton(.secondary, p)
-                Button("Source code") {
-                    openURL(URL(string: "https://github.com/tsainez/gauge")!)
-                }
-                .classicButton(.secondary, p)
+                Button("Privacy policy") { openURL(GaugeLinks.privacyPolicy) }
+                    .classicButton(.secondary, p)
+                Button("Source code") { openURL(GaugeLinks.sourceCode) }
+                    .classicButton(.secondary, p)
             }
+            Button("Steam privacy settings") {
+                openURL(URL(string: "https://steamcommunity.com/my/edit/settings")!)
+            }
+            .classicButton(.secondary, p)
         }
         .padding(16)
     }

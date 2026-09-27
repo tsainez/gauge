@@ -78,7 +78,7 @@ struct HeaderBar: View {
                 ProgressView().controlSize(.small)
                 Text(label).foregroundStyle(p.secondaryText)
             }
-            if let name = model.settings.demoMode ? "tony!!!" : model.settings.profile?.personaName {
+            if let name = model.settings.demoMode ? DemoData.personaName : model.settings.profile?.personaName {
                 Text(name).foregroundStyle(p.text.opacity(0.9))
             }
         }

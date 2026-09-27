@@ -28,6 +28,8 @@ nonisolated struct DemoSnapshot: Sendable {
 
 nonisolated enum DemoData {
     static let steamID = "76561190000000000"
+    /// Shown in the header in demo mode, which App Review and screenshots use.
+    static let personaName = "Demo profile"
 
     static func make(now: Date = Date(), seed: UInt64 = 0x6A_0E6E) -> DemoDataset {
         var rng = SplitMix64(seed: seed)
@@ -50,7 +52,7 @@ nonisolated enum DemoData {
             .map(\.id) ?? []
 
         return DemoDataset(
-            profile: ProfileSummary(steamID64: steamID, personaName: "tony!!!", avatarURL: nil, isPublic: true),
+            profile: ProfileSummary(steamID64: steamID, personaName: personaName, avatarURL: nil, isPublic: true),
             contexts: builder.contexts,
             itemsByContext: builder.itemsByContext,
             prices: builder.prices,

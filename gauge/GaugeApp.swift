@@ -83,3 +83,9 @@ struct MenuBarContent: View {
         .keyboardShortcut("q")
     }
 }
+
+/// Gauge's own pages. The privacy policy is also the Privacy Policy URL in App Store Connect.
+enum GaugeLinks {
+    static let privacyPolicy = URL(string: "https://github.com/tsainez/gauge/blob/main/PRIVACY.md")!
+    static let sourceCode = URL(string: "https://github.com/tsainez/gauge")!
+}

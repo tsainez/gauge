@@ -29,7 +29,7 @@ The app sandbox needs **Outgoing Connections (Client)**. It's turned on through 
 Every pull request and every push to `main` runs `.github/workflows/ci.yml` on GitHub's `xcode-27` runner (macOS 27, Xcode 27.0). `macos-latest` can't build Gauge: it's macOS 26 with Xcode 26, and Gauge needs the macOS 27 SDK to build and a Mac running macOS 27 for its tests, which run inside the app. The `xcode-27` image is in public preview, so a run may wait in the queue.
 
 - **Build and test** builds the shared `gauge` scheme and runs the unit tests. Compile errors and failing tests show up as annotations on the pull request. The UI tests are built but skipped until they test more than Xcode's template.
-- **Release build** archives the Release configuration without signing, so a compile error that only happens in Release fails the pull request instead of the release.
+- **Release build** archives the Release configuration without signing, so a compile error that only happens in Release fails the pull request instead of the release. It then checks what App Store Connect requires of a Mac upload: every slot in the app icon set holds a PNG of the right size, 512×512 and 512×512@2x included, and the archived app carries the icon, an app category, and the export compliance answer. `ITSAppUsesNonExemptEncryption` is NO because Gauge's only encryption is HTTPS through Apple's frameworks.
 
 CI doesn't sign the app, so the tests run unsandboxed there. To run what CI runs from Terminal:
 
@@ -56,6 +56,8 @@ Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a 
 Settings → Network activity lists every request Gauge has made to steamcommunity.com this session: when, what kind (prices, inventories, profiles, listings, sign-in renewals), the address, the status, how long it waited in Gauge's own queue, how long Steam took, and how much came back. It also shows each kind's pace and whether Steam has asked Gauge to wait.
 
 Every request is also written to `~/Library/Logs/Gauge/network.log` inside the app's container (about 2 MB, with one older file kept) and to the unified log (Console.app, the app's bundle id, category `network`). **Export log…** saves the file with a short header; **Copy** copies this session's lines. Entries never include your password, cookies, session ids, or request bodies; a listing's entry names the asset and price. Item artwork loads from Steam's image servers through the shared URL cache and isn't listed.
+
+The privacy policy, [PRIVACY.md](PRIVACY.md), tells users the same. The welcome screen and Settings → About link to it, and its GitHub address is the Privacy Policy URL for App Store Connect. Keep it in step when Gauge starts storing or sending something new.
 
 ## Signing in with Steam
 
