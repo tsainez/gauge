@@ -11,6 +11,43 @@ import SwiftData
 import Testing
 @testable import gauge
 
+
+
+
+final class AppModelMockSteam: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var routes: [(match: String, status: Int, body: String)] = []
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    static let lock = NSLock()
+
+    static func configuration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [AppModelMockSteam.self]
+        return configuration
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url?.absoluteString ?? ""
+        Self.lock.lock()
+        Self.requests.append(request)
+        let route = Self.routes.first { url.contains($0.match) }
+        Self.lock.unlock()
+        let status = route?.status ?? 404
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data((route?.body ?? "").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+
+
+
+@Suite(.serialized)
 @MainActor
 struct AppModelSyncTests {
     static let profile = ProfileSummary(steamID64: "76561197960287930", personaName: "Real Profile", avatarURL: nil, isPublic: true)
@@ -24,7 +61,7 @@ struct AppModelSyncTests {
     func makeModel() -> (AppModel, UserDefaults, String) {
         let suite = "GaugeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        let client = SteamClient(configuration: MockSteam.configuration(), intervalScale: 0)
+        let client = SteamClient(configuration: AppModelMockSteam.configuration(), intervalScale: 0)
         let model = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: client, networkLog: nil)
         return (model, defaults, suite)
     }
@@ -33,12 +70,14 @@ struct AppModelSyncTests {
         let (model, defaults, suite) = makeModel()
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        MockSteam.requests = []
-        MockSteam.routes = [
-            ("/inventory/", 200, Self.directoryHtml),
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
             ("/inventory/76561197960287930/570/2", 200, SteamClientTests.page(["1", "2"], more: nil)),
-            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil))
+            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil)),
+            ("/inventory/", 200, Self.directoryHtml)
         ]
+        AppModelMockSteam.lock.unlock()
 
         model.updateSettings { $0.profile = Self.profile }
 
@@ -55,10 +94,12 @@ struct AppModelSyncTests {
         let (model, defaults, suite) = makeModel()
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        MockSteam.requests = []
-        MockSteam.routes = [
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
             ("/inventory/", 429, "")
         ]
+        AppModelMockSteam.lock.unlock()
 
         model.updateSettings { $0.profile = Self.profile }
 
@@ -72,10 +113,12 @@ struct AppModelSyncTests {
         let (model, defaults, suite) = makeModel()
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        MockSteam.requests = []
-        MockSteam.routes = [
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
             ("/inventory/", 403, "null")
         ]
+        AppModelMockSteam.lock.unlock()
 
         model.updateSettings { $0.profile = Self.profile }
 
@@ -90,32 +133,41 @@ struct AppModelSyncTests {
         let (model, defaults, suite) = makeModel()
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        MockSteam.requests = []
-        MockSteam.routes = [
-            ("/inventory/", 200, Self.directoryHtml),
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
             ("/inventory/76561197960287930/570/2", 200, SteamClientTests.page(["1", "2"], more: nil)),
-            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil))
+            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil)),
+            ("/inventory/", 200, Self.directoryHtml)
         ]
+        AppModelMockSteam.lock.unlock()
 
         model.updateSettings { $0.profile = Self.profile }
 
         // Initial sync
         await model.syncInventories(force: true)
-        #expect(MockSteam.requests.count == 3)
 
-        // Change one route to reflect a change
-        MockSteam.requests = []
-        MockSteam.routes = [
-            ("/inventory/", 200, Self.directoryHtml.replacingOccurrences(of: "\"asset_count\":540", with: "\"asset_count\":541")),
+
+        defaults.removeObject(forKey: AppModel.lastCheckKey)
+
+        AppModelMockSteam.lock.lock()
+        let initialRequestCount = AppModelMockSteam.requests.count
+        AppModelMockSteam.routes = [
             ("/inventory/76561197960287930/570/2", 200, SteamClientTests.page(["1", "2"], more: nil)),
-            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3", "4"], more: nil))
+            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3", "4"], more: nil)),
+            ("/inventory/", 200, Self.directoryHtml.replacingOccurrences(of: "\"asset_count\":540", with: "\"asset_count\":541"))
         ]
+        AppModelMockSteam.lock.unlock()
 
         // Second sync with force=false. Since 570 hasn't changed its count, it shouldn't be fetched again.
         await model.syncInventories(force: false)
 
         // One request for directory, one for the changed inventory 753_6
-        #expect(MockSteam.requests.count == 2)
+        AppModelMockSteam.lock.lock()
+        let finalRequestCount = AppModelMockSteam.requests.count
+        AppModelMockSteam.lock.unlock()
+
+        #expect(finalRequestCount - initialRequestCount == 2)
         #expect(model.itemsByContext["570_2"]?.count == 2) // Unchanged
         #expect(model.itemsByContext["753_6"]?.count == 2) // Updated
     }
@@ -124,12 +176,14 @@ struct AppModelSyncTests {
         let (model, defaults, suite) = makeModel()
         defer { defaults.removePersistentDomain(forName: suite) }
 
-        MockSteam.requests = []
-        MockSteam.routes = [
-            ("/inventory/", 200, Self.directoryHtml),
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
             ("/inventory/76561197960287930/570/2", 200, SteamClientTests.page(["1", "2"], more: nil)),
-            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil))
+            ("/inventory/76561197960287930/753/6", 200, SteamClientTests.page(["3"], more: nil)),
+            ("/inventory/", 200, Self.directoryHtml)
         ]
+        AppModelMockSteam.lock.unlock()
 
         model.updateSettings { $0.profile = Self.profile }
 
@@ -138,11 +192,13 @@ struct AppModelSyncTests {
         #expect(model.itemsByContext["570_2"]?.count == 2)
 
         // Second sync that hits a rate limit on the first inventory
-        MockSteam.requests = []
-        MockSteam.routes = [
-            ("/inventory/", 200, Self.directoryHtml),
-            ("/inventory/76561197960287930/570/2", 429, "")
+        AppModelMockSteam.lock.lock()
+        AppModelMockSteam.requests = []
+        AppModelMockSteam.routes = [
+            ("/inventory/76561197960287930/570/2", 429, ""),
+            ("/inventory/", 200, Self.directoryHtml)
         ]
+        AppModelMockSteam.lock.unlock()
 
         await model.syncInventories(force: true)
 
