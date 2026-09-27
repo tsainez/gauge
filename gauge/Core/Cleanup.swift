@@ -1,18 +1,12 @@
-//
-//  Cleanup.swift
-//  gauge
-//
-//  Sorts marketable items into buckets by the user's rules. Pure and
-//  synchronous so it can run on every rule change and be unit tested.
-//
-//  Selling rules pick candidates (extra copies, cheap items, or everything
-//  else); protections then keep some of them anyway (starred items, set
-//  pieces, rising prices, items that only pay a cent) or hold expensive ones
-//  for a second look.
-//
-
 import Foundation
 
+/// Sorts marketable items into buckets by the user's rules. Pure and
+/// synchronous so it can run on every rule change and be unit tested.
+///
+/// Selling rules pick candidates (extra copies, cheap items, or everything
+/// else); protections then keep some of them anyway (starred items, set
+/// pieces, rising prices, items that only pay a cent) or hold expensive ones
+/// for a second look.
 nonisolated enum CleanupBucket: String, Codable, CaseIterable, Identifiable, Sendable {
     case sell
     case review
