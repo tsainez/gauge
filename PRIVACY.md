@@ -26,7 +26,7 @@ You sign in on Steam's own page, shown in a sheet inside Gauge. Gauge never sees
 
 Gauge's own requests go only to Steam: steamcommunity.com and Steam's sign-in pages for profiles, inventories, prices, listings, and signing in, and Steam's image servers for item artwork. Each request goes straight from your Mac to Valve and includes what Steam needs to answer it, such as the profile you're viewing, the item you're pricing, or the item and price of a listing you started. Requests that need your sign-in carry your Steam session. Like any internet request, they show Valve your IP address. Valve's privacy policy covers what Steam does with them.
 
-Gauge has no analytics, advertising, or tracking, and no third-party SDKs. Links such as **View on Market** open in your web browser.
+Gauge has no analytics, advertising, or tracking, and no third-party SDKs. Links such as **View on Market** open in your web browser. For a Counter-Strike 2 skin, **Find it in CSFloat's database** opens the website of CSFloat, a third party, with the skin's weapon, finish, and pattern in the address; CSFloat's own privacy policy covers that site.
 
 ## What the developer receives
 
