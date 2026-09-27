@@ -24,6 +24,21 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 
 The app sandbox needs **Outgoing Connections (Client)**. It's turned on through `ENABLE_OUTGOING_NETWORK_CONNECTIONS` in the target's build settings. CSV export needs user-selected read/write file access (`ENABLE_USER_SELECTED_FILES = readwrite`).
 
+## Continuous integration
+
+Every pull request and every push to `main` runs `.github/workflows/ci.yml` on GitHub's `xcode-27` runner (macOS 27, Xcode 27.0). `macos-latest` can't build Gauge: it's macOS 26 with Xcode 26, and Gauge needs the macOS 27 SDK to build and a Mac running macOS 27 for its tests, which run inside the app. The `xcode-27` image is in public preview, so a run may wait in the queue.
+
+- **Build and test** builds the shared `gauge` scheme and runs the unit tests. Compile errors and failing tests show up as annotations on the pull request. The UI tests are built but skipped until they test more than Xcode's template.
+- **Release build** archives the Release configuration without signing, so a compile error that only happens in Release fails the pull request instead of the release.
+
+CI doesn't sign the app, so the tests run unsandboxed there. To run what CI runs from Terminal:
+
+```
+xcodebuild test -project gauge.xcodeproj -scheme gauge -destination 'platform=macOS' -skip-testing:gaugeUITests CODE_SIGNING_ALLOWED=NO
+```
+
+When you move to a newer Xcode, change `DEVELOPER_DIR` in the workflow to match. Releases aren't automated yet; the plan is under Delivery in TODO.md.
+
 ## How it stays fast: caching
 
 Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a minute per IP address, and inventory requests are limited further still. So the UI never waits on the network:

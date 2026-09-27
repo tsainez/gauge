@@ -44,6 +44,15 @@ The goal is a realistic, image-rich dataset for App Store screenshots.
 ## Engineering
 
 - [ ] Move inventory JSON encoding and decoding fully off the main actor for very large inventories (100k+ items); consider a `ModelActor`.
-- [ ] Add UI tests driven by Demo mode (`gaugeUITests`).
+- [ ] Add UI tests driven by Demo mode (`gaugeUITests`), then remove `-skip-testing:gaugeUITests` from `.github/workflows/ci.yml` so CI runs them.
 - [ ] App Store review: explain the sign-in web view and the confirmation step in the review notes.
 - [ ] Sign out on Steam's side too (revoke the refresh token), not only by deleting the cookies on this Mac.
+
+## Delivery
+
+Releases should go through Xcode Cloud, with GitHub Actions staying the pull request check. Archiving a signed build on a GitHub runner needs a signing certificate and its private key stored as repository secrets (an App Store Connect API key only covers the export and upload). Xcode Cloud manages signing itself and comes with the developer program (25 compute hours a month).
+
+- [ ] Create the app record in App Store Connect: bundle ID `tsainez.gauge`, name Gauge.
+- [ ] Add the app icon first (see Product). App Store Connect won't accept a build without one.
+- [ ] Create one Xcode Cloud workflow from Xcode. Start condition: Tag Changes, tags beginning with `v`. Action: Archive for macOS, prepared for TestFlight and the App Store. Post-action: TestFlight internal testing. Leave out branch and pull request start conditions; CI already covers those, and the compute hours go further.
+- [ ] To release: raise `MARKETING_VERSION` in a pull request and merge it, then tag that commit on `main` as `vX.Y.Z` and push the tag. Xcode Cloud sets the build number. Mac builds need build numbers that only go up, so upload every build through Xcode Cloud, or set its next build number above any build you uploaded by hand.
