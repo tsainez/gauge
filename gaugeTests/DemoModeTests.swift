@@ -40,7 +40,7 @@ struct DemoModeTests {
         let suite = "GaugeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         let client = SteamClient(configuration: OfflineSteam.configuration(), intervalScale: 0)
-        let model = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: client)
+        let model = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: client, networkLog: nil)
         return (model, defaults, suite)
     }
 
@@ -87,7 +87,7 @@ struct DemoModeTests {
         model.enterDemo()
 
         // A new launch reads the saved settings and comes back in demo mode.
-        let relaunched = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: model.client)
+        let relaunched = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: model.client, networkLog: nil)
         await relaunched.start()
         #expect(relaunched.settings.demoMode)
         #expect(!relaunched.allItems.isEmpty)

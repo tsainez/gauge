@@ -32,6 +32,9 @@ struct RootView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        // Every palette is dark, so native controls (list selection, fields, menus) should be too.
+        // This view still reads the system's scheme for "Match macOS appearance".
+        .environment(\.colorScheme, .dark)
         .background(p.window)
         .foregroundStyle(p.text)
         .font(p.font(12.5))

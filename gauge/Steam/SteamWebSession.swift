@@ -25,6 +25,8 @@ final class SteamWebSession {
     private(set) var status: SteamSignInStatus = .unknown
     private(set) var isRenewing = false
 
+    /// Told about each off-screen renewal, for the network log.
+    @ObservationIgnored var onActivity: ((NetworkEvent) -> Void)?
     @ObservationIgnored private var loginCookie: String?
     @ObservationIgnored private var lastRenewalAttempt: Date?
     @ObservationIgnored private var renewal: Task<SteamLoginToken?, Never>?
@@ -125,18 +127,31 @@ final class SteamWebSession {
         isRenewing = true
         defer { isRenewing = false }
 
+        let started = Date()
         let webView = WKWebView(frame: .zero, configuration: Self.webViewConfiguration())
         webView.load(URLRequest(url: Self.renewalURL))
         defer { webView.stopLoading() }
         let deadline = Date().addingTimeInterval(timeout)
+        var renewed: SteamLoginToken?
         while Date() < deadline {
             try? await Task.sleep(nanoseconds: 500_000_000)
             // The cookie can briefly disappear while Steam redirects, so keep waiting on nil.
             if let token = await readToken(),
                token.steamID64 != current.steamID64 || (token.expiresAt ?? .distantPast) > (current.expiresAt ?? .distantPast) {
-                return token
+                renewed = token
+                break
             }
         }
+        onActivity?(NetworkEvent(
+            kind: .session,
+            startedAt: started,
+            url: Self.renewalURL.absoluteString,
+            signedIn: true,
+            duration: Date().timeIntervalSince(started),
+            outcome: renewed == nil ? .failed("Steam didn't renew the session") : .ok,
+            note: "loaded off screen to renew the sign-in"
+        ))
+        if let renewed { return renewed }
         return await readToken()
     }
 

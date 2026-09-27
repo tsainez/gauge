@@ -97,6 +97,12 @@ nonisolated enum Money {
         return format(cents, currency)
     }
 
+    /// For chart axes: whole amounts drop the cents ("$250"), others keep them ("$2.50").
+    static func tick(_ cents: Int, _ currency: SteamCurrency) -> String {
+        let value = Decimal(cents) / 100
+        return value.formatted(.currency(code: currency.isoCode).precision(.fractionLength(cents % 100 == 0 ? 0 : 2)))
+    }
+
     /// Short form for tight spaces: "$1.2K", "$34", "$0.03".
     static func compact(_ cents: Int, _ currency: SteamCurrency) -> String {
         if cents >= 100_000 {

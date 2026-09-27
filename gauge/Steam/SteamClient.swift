@@ -7,7 +7,8 @@
 //  a minute per IP, fewer for inventories), so each endpoint family has its
 //  own gate that spaces requests out and backs off after a 429. Callers never
 //  wait on the network from the UI; they read cached data and this actor
-//  fills the cache in the background.
+//  fills the cache in the background. Every request is reported to a
+//  monitor for the network log in Settings.
 //
 
 import Foundation
@@ -74,6 +75,25 @@ actor SteamClient {
             case .sell: 2.5
             }
         }
+
+        var logKind: NetworkEvent.Kind {
+            switch self {
+            case .profile: .profile
+            case .inventory: .inventory
+            case .market: .market
+            case .sell: .sell
+            }
+        }
+
+        init?(_ kind: NetworkEvent.Kind) {
+            switch kind {
+            case .profile: self = .profile
+            case .inventory: self = .inventory
+            case .market: self = .market
+            case .sell: self = .sell
+            case .session: return nil
+            }
+        }
     }
 
     private nonisolated struct Gate {
@@ -84,6 +104,7 @@ actor SteamClient {
     private let session: URLSession
     private let intervalScale: Double
     private var gates: [Endpoint: Gate] = [:]
+    private var monitor: (@Sendable (NetworkEvent) -> Void)?
 
     /// - Parameter intervalScale: multiplies request spacing; tests pass 0.
     init(configuration: URLSessionConfiguration = SteamClient.defaultConfiguration(), intervalScale: Double = 1) {
@@ -197,14 +218,21 @@ actor SteamClient {
             ("price", String(sell.sellerCents)),
         ]
         request.httpBody = Data(form.map { "\($0.0)=\(PriceKey.percentEncode($0.1))" }.joined(separator: "&").utf8)
+        // The log gets the listing's fields, never the session id.
+        let note = form.filter { $0.0 != "sessionid" }.map { "\($0.0)=\($0.1)" }.joined(separator: " ")
         // Steam reports listing errors as HTTP 502 with a JSON message, so read the body either way.
-        let data = try await send(request, endpoint: .sell, acceptErrorBodies: true)
+        let data = try await send(request, endpoint: .sell, acceptErrorBodies: true, note: note)
         return SellResponseParser.parse(data)
     }
 
     /// When the next request of a kind may go out. Used to show "resumes at" in the UI.
     func nextAllowed(_ endpoint: Endpoint) -> Date {
         gates[endpoint]?.nextAllowed ?? .distantPast
+    }
+
+    /// Receives every request this client sends, as it finishes. Replaces any earlier monitor.
+    func setMonitor(_ monitor: (@Sendable (NetworkEvent) -> Void)?) {
+        self.monitor = monitor
     }
 
     // MARK: - Transport
@@ -216,28 +244,62 @@ actor SteamClient {
         request.setValue(auth.cookieHeader, forHTTPHeaderField: "Cookie")
     }
 
-    private func send(_ request: URLRequest, endpoint: Endpoint, acceptErrorBodies: Bool = false) async throws -> Data {
+    private func send(_ request: URLRequest, endpoint: Endpoint, acceptErrorBodies: Bool = false, note: String? = nil) async throws -> Data {
+        let queued = Date()
         let wait = reserveSlot(endpoint)
         if wait > 0 {
             try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
         }
 
-        let (data, response) = try await session.data(for: request)
+        let started = Date()
+        var event = NetworkEvent(
+            kind: endpoint.logKind,
+            startedAt: started,
+            method: request.httpMethod ?? "GET",
+            url: request.url?.absoluteString ?? "",
+            signedIn: request.value(forHTTPHeaderField: "Cookie") != nil,
+            waited: started.timeIntervalSince(queued),
+            note: note
+        )
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            event.duration = Date().timeIntervalSince(started)
+            event.outcome = error is CancellationError || (error as? URLError)?.code == .cancelled ? .cancelled : .failed(error.localizedDescription)
+            monitor?(event)
+            throw error
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        event.duration = Date().timeIntervalSince(started)
+        event.status = status
+        event.bytes = data.count
+        defer { monitor?(event) }
+
         switch status {
         case 200..<300:
             gates[endpoint, default: Gate()].backoff = 0
             return data
         case 429:
-            throw Failure.rateLimited(retryAfter: backOff(endpoint))
+            let retryAfter = backOff(endpoint)
+            event.outcome = .rateLimited(retryAfter: retryAfter)
+            throw Failure.rateLimited(retryAfter: retryAfter)
         case 403 where endpoint == .inventory:
+            event.outcome = .failed("private inventory")
             throw Failure.privateInventory
         default:
-            if acceptErrorBodies && !data.isEmpty { return data }
+            if acceptErrorBodies && !data.isEmpty {
+                event.outcome = .failed("HTTP \(status) with Steam's explanation")
+                return data
+            }
             if status >= 500 && endpoint == .market {
                 // Steam's market answers overload with 5xx as often as 429.
-                throw Failure.rateLimited(retryAfter: backOff(endpoint))
+                let retryAfter = backOff(endpoint)
+                event.outcome = .rateLimited(retryAfter: retryAfter)
+                throw Failure.rateLimited(retryAfter: retryAfter)
             }
+            event.outcome = .failed("HTTP \(status)")
             throw Failure.http(status)
         }
     }

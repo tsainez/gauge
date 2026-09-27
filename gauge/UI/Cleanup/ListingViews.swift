@@ -2,7 +2,8 @@
 //  ListingViews.swift
 //  gauge
 //
-//  The Sell sheet (from Inventory) and the listing progress list shared with Clean up.
+//  The Sell sheet (from Inventory) and the listing rows and progress list
+//  shared with Clean up.
 //
 
 import SwiftUI
@@ -31,7 +32,7 @@ struct SellSheet: View {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(plan.jobs) { job in
-                            ListingRow(name: job.item.name, buyerCents: job.buyerCents, sellerCents: job.sellerCents, status: nil, palette: p, currency: model.currency)
+                            ListingRow(item: job.item, buyerCents: job.buyerCents, sellerCents: job.sellerCents, status: nil, palette: p, currency: model.currency)
                         }
                     }
                 }
@@ -219,7 +220,7 @@ struct ListingProgressList: View {
                 VStack(spacing: 0) {
                     ForEach(run.jobs) { job in
                         ListingRow(
-                            name: job.item.name,
+                            item: job.item,
                             buyerCents: job.buyerCents,
                             sellerCents: job.sellerCents,
                             status: job.state,
@@ -235,8 +236,11 @@ struct ListingProgressList: View {
 }
 
 struct ListingRow: View {
-    let name: String
+    let item: InventoryItem
+    /// Copies listed at this price, shown as "×2".
+    var count = 1
     let buyerCents: Int
+    /// What the seller receives for one.
     let sellerCents: Int
     let status: ListingRun.JobState?
     let palette: Palette
@@ -250,8 +254,19 @@ struct ListingRow: View {
                     .foregroundStyle(color(status))
                     .frame(width: 14)
             }
+            ItemArtwork(item: item, size: 96, palette: p)
+                .frame(width: 40, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: p.bevels ? 0 : 4))
+                .overlay(alignment: .bottom) { p.rarity(item).frame(height: 2) }
             VStack(alignment: .leading, spacing: 1) {
-                Text(name).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(item.name).lineLimit(1)
+                    if count > 1 {
+                        Text("×\(count)")
+                            .font(p.font(11, .bold))
+                            .foregroundStyle(p.accent)
+                    }
+                }
                 if let status, let detail = detail(status) {
                     Text(detail)
                         .font(p.font(11))
@@ -261,11 +276,12 @@ struct ListingRow: View {
             }
             Spacer()
             Text(Money.format(buyerCents, currency)).foregroundStyle(p.accent)
-            Text("→ \(Money.format(sellerCents, currency))")
+            Text("→ \(Money.format(sellerCents * count, currency))")
                 .foregroundStyle(p.secondaryText)
                 .frame(width: 72, alignment: .trailing)
         }
         .font(p.font(12))
+        .foregroundStyle(p.text)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
         .overlay(alignment: .bottom) { p.gridLine.frame(height: 1) }

@@ -45,6 +45,16 @@ struct SteamFeeTests {
     }
 }
 
+struct MoneyFormatTests {
+    @Test func axisTicksDropCentsOnlyWhenWhole() {
+        // Formatting follows the Mac's locale, so compare against the full format.
+        #expect(Money.tick(250, .usd) == Money.format(250, .usd))
+        #expect(Money.tick(25_000, .usd) != Money.format(25_000, .usd))
+        #expect(Money.tick(25_000, .usd).count < Money.format(25_000, .usd).count)
+        #expect(PriceParser.cents(from: Money.tick(25_000, .usd)) == 25_000)
+    }
+}
+
 struct PriceParserTests {
     @Test(arguments: [
         ("$0.03", 3),

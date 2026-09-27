@@ -74,9 +74,10 @@ struct InventoryQueryTests {
 
 struct AppSettingsTests {
     @Test func decodesOlderSettingsWithDefaults() throws {
-        let json = Data(#"{"theme":"modern","cleanupRules":{"setThreshold":4}}"#.utf8)
+        let json = Data(#"{"theme":"classicDark","cleanupRules":{"setThreshold":4}}"#.utf8)
         let settings = try JSONDecoder().decode(AppSettings.self, from: json)
-        #expect(settings.theme == .modern)
+        #expect(settings.theme == .classicDark)
+        #expect(AppSettings().theme == .modern)
         #expect(settings.currency == .usd)
         #expect(settings.cleanupRules.setThreshold == 4)
         #expect(settings.cleanupRules.keepStarred)
@@ -85,7 +86,8 @@ struct AppSettingsTests {
     @Test func roundTrips() throws {
         var settings = AppSettings()
         settings.profile = ProfileSummary(steamID64: "76561197960287930", personaName: "Gabe", avatarURL: nil, isPublic: true)
-        settings.cleanupRules.sellFloorItems = true
+        settings.cleanupRules.sellEverythingElse = true
+        settings.cleanupRules.cheapBelowCents = 25
         let decoded = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
         #expect(decoded == settings)
     }

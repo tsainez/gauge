@@ -8,10 +8,10 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 
 | Tab | What it does |
 | --- | --- |
-| **Portfolio** | Marketable net worth (what buyers pay, and what you'd receive after fees), a Week, Month, or Lifetime chart from daily snapshots, a per-game table, and saved views (Fluff, Complete sets, Price moved this week). |
+| **Portfolio** | Marketable net worth (what buyers pay, and what you'd receive after fees) with a Week, Month, or Lifetime chart from daily snapshots: dates along the bottom, values up the side, and the value under the pointer. Below it, your most valuable items, the week's biggest price moves, and the items you own the most copies of, each with artwork. The sidebar shows each game's value with a bar to compare them, plus saved views (Fluff, Complete sets, Price moved this week). |
 | **Inventory** | A grid like Steam's inventory page with filters built from Steam's own tags (rarity, quality, type, slot, hero, and so on), search, sort by value, rarity, name, or newest, stars, multi-select (⌘-click, ⇧-click), set ownership ("you own 3 of 5"), and a Sell sheet. |
-| **Clean up** | Three steps. First, set rules: keep sets, keep starred items, a pricing strategy, a price floor, "ask me about items worth $5 or more", and hold items that are rising. Second, review four buckets: **Sell**, **Floor items**, **Worth a look**, and **Keep**. Right-click any row to move it. Third, list the Sell bucket (plus floor items, if you choose) a few at a time. |
-| **Settings** | Classic, Classic Dark, and Modern themes (or follow macOS), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, CSV export, and clearing local data. |
+| **Clean up** | Rules on the left pick what to sell: **extra copies** (keep one of each), **cheap items** (under $0.10 by default), and optionally everything else. Starred items are always kept, anything worth $5 or more waits in **Worth a look**, and set pieces and rising prices are Advanced options. The list shows one bucket at a time (**Sell**, **Worth a look**, **Keep**) with each item's artwork, reasons, and payout; search, filter by reason, and sort it. Move items by swiping a row (right to sell, left to keep), pressing ⌫, dragging rows onto a bucket, or from the selection bar, and undo with ⌘Z. Moves are remembered between launches. The inspector shows the selected item large, with its prices and where its copies are. Then list the Sell bucket a few at a time. |
+| **Settings** | Modern (the default), Classic, and Classic Dark themes (or Classic by day and Classic Dark by night), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, **network activity** (every request to Steam, Steam's pacing and back-off, and an exportable log), CSV export, and clearing local data. |
 
 **Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2, and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
 
@@ -50,6 +50,12 @@ Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a 
 - **Item images** load through `AsyncImage` into a 512 MB `URLCache` on disk.
 - **Daily snapshots** of net worth are upserted as prices arrive and stored per currency. They draw the Portfolio chart.
 
+## Seeing what Gauge sends
+
+Settings → Network activity lists every request Gauge has made to steamcommunity.com this session: when, what kind (prices, inventories, profiles, listings, sign-in renewals), the address, the status, how long it waited in Gauge's own queue, how long Steam took, and how much came back. It also shows each kind's pace and whether Steam has asked Gauge to wait.
+
+Every request is also written to `~/Library/Logs/Gauge/network.log` inside the app's container (about 2 MB, with one older file kept) and to the unified log (Console.app, the app's bundle id, category `network`). **Export log…** saves the file with a short header; **Copy** copies this session's lines. Entries never include your password, cookies, session ids, or request bodies; a listing's entry names the asset and price. Item artwork loads from Steam's image servers through the shared URL cache and isn't listed.
+
 ## Signing in with Steam
 
 Gauge never sees your password. **Sign in with Steam** opens Steam's own sign-in page (steamcommunity.com) in a sheet, where you use your password or scan the QR code with the Steam Mobile app. Steam Guard works as it does in a browser. Gauge then reads the session cookie Steam sets (`steamLoginSecure`) from WebKit's cookie store, which stays in the app's sandbox on your Mac. That one session:
@@ -63,6 +69,7 @@ The sheet shows the page's real address, and only Steam's sign-in pages open in 
 ## Selling, and why it's safe
 
 - Every listing still has to be confirmed in the **Steam Mobile app**. Nothing sells without your approval there.
+- Clean up only sells what a rule picks or you move there yourself. Out of the box that's extra copies and items under $0.10; everything else stays in Keep.
 - Starred items are never listed (Settings → Protect starred items).
 - Before listing, any price older than 6 hours is re-checked. An item is skipped if its price fell by more than half.
 - Listing stops at the first sign-in or rate-limit problem, and you can resume it.
@@ -81,24 +88,31 @@ gauge/
     InventoryItem.swift    the in-memory item model
     SteamParsing.swift     inventory pages, the inventory directory, priceoverview, sellitem, sets
     InventoryQuery.swift   Inventory tab filtering, sorting, tag facets
-    Cleanup.swift          clean-up rules → buckets, valuation, price trends
+    Cleanup.swift          clean-up rules → buckets, extra copies, valuation, price trends
+    CleanupRows.swift      the Clean up list: rows per item and bucket, filters, sort, drag payloads
+    Insights.swift         Portfolio lists (most valuable, movers, most copies) and chart scales
     AppSettings.swift      settings (decode with defaults)
     DemoData.swift         deterministic demo inventory
   Steam/
     SteamClient.swift      rate-limited actor for every steamcommunity.com request
+    NetworkLog.swift       request records, totals, and the rotating log file
     SteamWebSession.swift  Sign in with Steam: WebKit cookies, status, renewal
   Persistence/Models.swift SwiftData cache
-  Services/                AppModel (state, sync, pricing queue, snapshots, selling), UI sessions
+  Services/                AppModel (state, sync, pricing queue, snapshots, selling, clean-up choices),
+                           network activity, UI sessions
   UI/                      SwiftUI: theme, components, one folder per tab
-gaugeTests/                Swift Testing: fees, parsing, rules, queries, settings, client with a mock server
+gaugeTests/                Swift Testing: fees, parsing, rules, rows, insights, queries, settings,
+                           network log, client with a mock server, model tests on an in-memory store
 ```
 
 ## What was verified, and what wasn't
 
-This MVP was written in an environment without Xcode or network access to Steam. Specifically:
+Gauge is mostly written in an environment without Xcode or network access to Steam, then built and run in Xcode. For the current version:
 
-- `Core/` and `SteamClient` were compiled with Swift 6.2 using the project's settings (MainActor default isolation, approachable concurrency), and the test suite passed: 51 tests, including a mock-server test of pagination, 429 back-off, and the sell request.
-- The services and UI layers were type-checked against stand-ins for SwiftData, SwiftUI, Charts, and WebKit. That catches mistakes in Gauge's own code, not every mismatch with Apple's frameworks. **Expect to fix a few compile errors on the first Xcode build.**
+- `Core/`, `SteamClient`, the network log, and `NetworkActivity` compile with Swift 6.4 on Linux using the project's settings (MainActor default isolation, approachable concurrency), and their tests pass there: 87 tests, including mock-server tests of pagination, 429 back-off, the sell request, and that the network log never records the session cookie or session id.
+- The services and UI layers are type-checked against stand-ins for SwiftUI, Charts, SwiftData, AppKit, and WebKit, with member import visibility on. The stand-ins follow the SDK's signatures and accept the earlier version of the app that already builds in Xcode. That catches mistakes in Gauge's own code, not every mismatch with Apple's frameworks; CI's Xcode 27 build is the real check.
+- Model tests that need SwiftData or `UndoManager` (demo mode, remembered and undoable clean-up choices) are only type-checked on Linux. CI runs them on macOS 27, and so does ⌘U.
+- Interactions only a Mac can show haven't been seen yet: swipe actions and ⌫ in the Clean up list, dragging rows onto a bucket, the chart's hover readout, and how the Modern theme renders. See TODO.md.
 - Steam response formats come from how the endpoints are known to behave, but they haven't been checked against live responses yet. The most uncertain piece is set detection, which reads the set list from an item's description. See TODO.md.
 - Signing in follows how Steam's web sign-in is known to work: the `steamLoginSecure` cookie format, its JWT expiry, and renewal through the refresh cookie. The parsing is unit tested; the flow itself hasn't been run against Steam yet.
 

@@ -115,6 +115,7 @@ extension AppModel {
         defaults.set(lastInventoryCheck, forKey: Self.lastCheckKey)
         syncPhase = .idle
         rebuildDerived()
+        pruneCleanupOverrides()
         rebuildPricingQueue()
         ensurePricing()
         recordSnapshot()

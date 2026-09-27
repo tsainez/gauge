@@ -496,7 +496,8 @@ struct ItemTile: View {
         }
         .frame(height: 138)
         .background(p.raised)
-        .overlay(Rectangle().strokeBorder(isSelected ? p.accent : p.bevelDark, lineWidth: isSelected ? 1.5 : 1))
+        .clipShape(RoundedRectangle(cornerRadius: p.corner))
+        .overlay { RoundedRectangle(cornerRadius: p.corner).strokeBorder(isSelected ? p.accent : p.bevelDark, lineWidth: isSelected ? 1.5 : 1) }
         .contentShape(Rectangle())
     }
 }

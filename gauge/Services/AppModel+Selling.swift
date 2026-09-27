@@ -14,21 +14,6 @@ extension AppModel {
     /// Re-check a price before listing when the cached one is older than this.
     static let listingPriceMaxAge: TimeInterval = 6 * 3_600
 
-    /// Builds the listing plan for Clean up, for one inventory or all of them.
-    func cleanupPlan(contextKey: String?) -> CleanupPlan {
-        var rules = settings.cleanupRules
-        if settings.protectStarred { rules.keepStarred = true }
-        return CleanupPlanner.plan(
-            items: items(in: contextKey),
-            prices: prices,
-            trends: monthlyChange,
-            starred: starred,
-            overrides: cleanup.overrides,
-            rules: rules,
-            currency: settings.currency
-        )
-    }
-
     /// Lists every job in `run` that hasn't finished. Stops early on sign-in or rate-limit problems.
     func runListing(_ run: ListingRun) async {
         guard !run.isRunning else { return }
@@ -117,7 +102,7 @@ extension AppModel {
         run.isRunning = false
         if !listedIDs.isEmpty {
             await removeItems(withIDs: listedIDs)
-            cleanup.overrides = cleanup.overrides.filter { !listedIDs.contains($0.key) }
+            pruneCleanupOverrides()
             recordSnapshot()
         }
     }

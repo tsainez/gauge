@@ -4,7 +4,9 @@
 //
 //  The three looks from the Settings storyboard. "Classic" follows the
 //  olive-and-gold Steam client of the mid-2000s: flat panels with a 1px
-//  bevel, gold section labels, and a gold primary button.
+//  bevel, gold section labels, and a gold primary button. "Modern", the
+//  default, follows today's Steam client: rounded panels with a hairline
+//  edge, blue accents, and the system font.
 //
 
 import SwiftUI
@@ -31,6 +33,10 @@ struct Palette {
     var gridLine: Color
     /// Nil uses the system font.
     var fontName: String?
+    /// Corner radius of panels and controls. The classic themes are square.
+    var corner: CGFloat = 0
+    /// The classic themes draw a 1px bevel around panels and buttons; Modern draws a hairline edge.
+    var bevels = true
 
     func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         guard let fontName else { return .system(size: size, weight: weight) }
@@ -117,7 +123,9 @@ struct Palette {
         negative: Color(hex: "E0584B")!,
         neutral: Color(hex: "67707B")!,
         gridLine: Color(hex: "1E2A38")!,
-        fontName: nil
+        fontName: nil,
+        corner: 7,
+        bevels: false
     )
 
     /// Swatches for the appearance picker.
