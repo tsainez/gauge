@@ -335,6 +335,14 @@ struct SelectionBar: View {
                 selection: browser.query.sort,
                 palette: p
             ) { browser.query.sort = $0 }
+            Button {
+                browser.query.ascending.toggle()
+            } label: {
+                Image(systemName: browser.query.ascending ? "arrow.up" : "arrow.down")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .classicButton(.secondary, p)
+            .help(browser.query.ascending ? "Ascending — click for descending" : "Descending — click for ascending")
             Button("Sell selected…") { onSell(sellable) }
                 .classicButton(.primary, p)
                 .disabled(sellable.isEmpty)

@@ -396,7 +396,11 @@ struct SkinCleanupTests {
         ]
         var query = InventoryQuery()
         query.sort = .float
+        #expect(query.ascending)
         #expect(query.apply(to: items, facts: InventoryFacts()).map(\.assetID) == ["3", "1", "2"])
+        // Reversed, the highest float leads, and items without one still come last.
+        query.ascending = false
+        #expect(query.apply(to: items, facts: InventoryFacts()).map(\.assetID) == ["1", "3", "2"])
     }
 }
 
