@@ -89,7 +89,32 @@ struct SettingsView: View {
             SectionLabel("Appearance", p)
             HStack(spacing: 10) {
                 ForEach(ThemeChoice.allCases) { theme in
-                    themeButton(theme, p)
+                    let swatch = Palette.named(theme)
+                    let selected = !model.settings.matchSystemAppearance && model.settings.theme == theme
+                    Button {
+                        model.updateSettings {
+                            $0.theme = theme
+                            $0.matchSystemAppearance = false
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 0) {
+                                ForEach(Array(swatch.swatches.enumerated()), id: \.offset) { index, color in
+                                    color.frame(maxWidth: index < 2 ? .infinity : 36)
+                                }
+                            }
+                            .frame(height: 42)
+                            HStack(spacing: 6) {
+                                RadioDot(isOn: selected, palette: p)
+                                Text(theme.title)
+                            }
+                        }
+                        .padding(8)
+                        .background(p.inset, in: RoundedRectangle(cornerRadius: p.corner))
+                        .overlay { RoundedRectangle(cornerRadius: p.corner).strokeBorder(selected ? p.accent : p.bevelDark, lineWidth: selected ? 1.5 : 1) }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             Toggle("Match macOS appearance (Classic by day, Classic Dark by night)", isOn: model.binding(\.matchSystemAppearance))
@@ -97,35 +122,6 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func themeButton(_ theme: ThemeChoice, _ p: Palette) -> some View {
-        let swatch = Palette.named(theme)
-        let selected = !model.settings.matchSystemAppearance && model.settings.theme == theme
-        return Button {
-            model.updateSettings {
-                $0.theme = theme
-                $0.matchSystemAppearance = false
-            }
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 0) {
-                    ForEach(Array(swatch.swatches.enumerated()), id: \.offset) { index, color in
-                        color.frame(maxWidth: index < 2 ? .infinity : 36)
-                    }
-                }
-                .frame(height: 42)
-                HStack(spacing: 6) {
-                    RadioDot(isOn: selected, palette: p)
-                    Text(theme.title)
-                }
-            }
-            .padding(8)
-            .background(p.inset, in: RoundedRectangle(cornerRadius: p.corner))
-            .overlay { RoundedRectangle(cornerRadius: p.corner).strokeBorder(selected ? p.accent : p.bevelDark, lineWidth: selected ? 1.5 : 1) }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Pricing
