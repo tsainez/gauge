@@ -5,6 +5,7 @@
 
 import Foundation
 import Testing
+import WebKit
 @testable import gauge
 
 struct SteamLoginTests {
@@ -104,5 +105,41 @@ struct SteamLoginTests {
         ]
         for url in kept { #expect(SteamSignInPage.keepsInSheet(URL(string: url)!), "\(url)") }
         for url in opened { #expect(!SteamSignInPage.keepsInSheet(URL(string: url)!), "\(url)") }
+    }
+
+    @MainActor
+    @Test func signOutClearsCookiesAndTokens() async throws {
+        let session = SteamWebSession()
+        let store = WKWebsiteDataStore.default()
+        let cookieStore = store.httpCookieStore
+
+        let cookie = try #require(HTTPCookie(properties: [
+            .domain: "steamcommunity.com",
+            .path: "/",
+            .name: "steamLoginSecure",
+            .value: Self.cookie(exp: 1_800_000_000),
+            .secure: "TRUE"
+        ]))
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            cookieStore.setCookie(cookie) {
+                continuation.resume()
+            }
+        }
+
+        await session.refresh(renewIfNeeded: false)
+        #expect(session.signedInSteamID == Self.steamID)
+
+        await session.signOut()
+
+        #expect(session.status == .signedOut)
+        #expect(session.signedInSteamID == nil)
+
+        let cookies = await withCheckedContinuation { (continuation: CheckedContinuation<[HTTPCookie], Never>) in
+            cookieStore.getAllCookies { cookies in
+                continuation.resume(returning: cookies)
+            }
+        }
+        #expect(cookies.isEmpty)
     }
 }
