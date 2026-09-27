@@ -571,7 +571,7 @@ struct NetWorthChart: View {
         .chartXAxis {
             AxisMarks(values: .automatic(desiredCount: range == .week ? 7 : 5)) { _ in
                 AxisGridLine().foregroundStyle(p.gridLine)
-                AxisTick(length: 4).foregroundStyle(p.bevelLight.opacity(0.6))
+                AxisTick().foregroundStyle(p.bevelLight.opacity(0.6))
                 AxisValueLabel(format: .dateTime.month(.abbreviated).day())
                     .foregroundStyle(p.secondaryText)
             }
