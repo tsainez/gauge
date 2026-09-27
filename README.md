@@ -9,11 +9,11 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 | Tab | What it does |
 | --- | --- |
 | **Portfolio** | Marketable net worth (what buyers pay, and what you'd receive after fees) with a Week, Month, or Lifetime chart from daily snapshots: dates along the bottom, values up the side, and the value under the pointer. Below it, your most valuable items, the week's biggest price moves, and the items you own the most copies of, each with artwork. The sidebar shows each game's value with a bar to compare them, plus saved views (Fluff, Complete sets, Price moved this week). |
-| **Inventory** | A grid like Steam's inventory page with filters built from Steam's own tags (rarity, quality, type, slot, hero, and so on), search, sort by value, rarity, name, or newest, stars, multi-select (⌘-click, ⇧-click), set ownership ("you own 3 of 5"), and a Sell sheet. |
-| **Clean up** | Rules on the left pick what to sell: **extra copies** (keep one of each), **cheap items** (under $0.10 by default), and optionally everything else. Starred items are always kept, anything worth $5 or more waits in **Worth a look**, and set pieces and rising prices are Advanced options. The list shows one bucket at a time (**Sell**, **Worth a look**, **Keep**) with each item's artwork, reasons, and payout; search, filter by reason, and sort it. Move items by swiping a row (right to sell, left to keep), pressing ⌫, dragging rows onto a bucket, or from the selection bar, and undo with ⌘Z. Moves are remembered between launches. The inspector shows the selected item large, with its prices and where its copies are. Then list the Sell bucket a few at a time. |
+| **Inventory** | A grid like Steam's inventory page with filters built from Steam's own tags (rarity, quality, type, slot, hero, and so on), search, sort by value, rarity, name, or newest, stars, multi-select (⌘-click, ⇧-click), set ownership ("you own 3 of 5"), and a Sell sheet. Right-click an item and choose **Refresh Item** to fetch it and its price from Steam again. Counter-Strike 2 skins show their float, pattern, and stickers, and sort by float (see [Counter-Strike 2 skins](#counter-strike-2-skins)). |
+| **Clean up** | Rules on the left pick what to sell: **extra copies** (keep one of each), **cheap items** (under $0.10 by default), and optionally everything else. Starred items are always kept, anything worth $5 or more waits in **Worth a look**, and set pieces and rising prices are Advanced options. The list shows one bucket at a time (**Sell**, **Worth a look**, **Keep**) with each item's artwork, reasons, and payout; search, filter by reason, and sort it. Move items by swiping a row (right to sell, left to keep), pressing ⌫, dragging rows onto a bucket, or from the selection bar, and undo with ⌘Z. Moves are remembered between launches. The inspector shows the selected item large, with its prices and where its copies are. For CS2 skins, the copy kept is the lowest float, and low floats and skins with stickers wait in Worth a look. Then list the Sell bucket a few at a time. |
 | **Settings** | Modern (the default), Classic, and Classic Dark themes (or Classic by day and Classic Dark by night), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, **network activity** (every request to Steam, Steam's pacing and back-off, and an exportable log), CSV export, and clearing local data. |
 
-**Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2, and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
+**Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2 (including skins with floats, patterns, stickers, and Doppler phases), and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
 
 ## Build and run
 
@@ -44,10 +44,11 @@ When you move to a newer Xcode, change `DEVELOPER_DIR` in the workflow to match.
 Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a minute per IP address, and inventory requests are limited further still. So the UI never waits on the network:
 
 - **Everything renders from local data.** On launch, `AppModel` loads the SwiftData cache (inventories, prices, stars, and snapshots) and the window shows it immediately. Background work refreshes the cache, and the UI updates as each result lands.
-- **Inventories are re-downloaded only when they change.** A check costs one request: the public inventory page lists every game with an item count. Gauge re-fetches a game's inventory only when its count changed, or when you choose Refresh (⌘R). Checks run on a timer; the default is every 6 hours.
+- **Inventories are re-downloaded only when they change.** A check costs one request: the public inventory page lists every game with an item count. Gauge re-fetches a game's inventory only when its count changed, when you choose Refresh (⌘R), or when you choose Refresh Item on one of its items. Steam can't send a single item, so Refresh Item downloads that item's whole inventory, then checks the item's price. Checks run on a timer; the default is every 6 hours.
 - **Prices come from a persistent queue.** Each unique market hash name is priced once (1,071 marketable items might be only a few hundred names). The queue prices never-priced items first, rarest first, then stale valuable items, then stale fluff. Valuable items refresh daily and fluff weekly, and both intervals are adjustable. The queue is rebuilt from the cache on every launch, so it picks up where it left off. The status bar shows how many items remain.
 - **Every endpoint has its own spacing.** `SteamClient` is an actor. It spaces requests per endpoint family (market, inventory, profile, sell) and backs off from 60 seconds up to 10 minutes after a 429.
 - **Item images** load through `AsyncImage` into a 512 MB `URLCache` on disk.
+- **An update can ask for one more download.** When a new version reads more out of an inventory than the last (CS2 floats, for one), inventories it cached before are downloaded once more when it launches, rather than at the next scheduled check. With inventory checks set to Manually, that waits for ⌘R.
 - **Daily snapshots** of net worth are upserted as prices arrive and stored per currency. They draw the Portfolio chart.
 
 ## Seeing what Gauge sends
@@ -78,6 +79,17 @@ The sheet shows the page's real address, and only Steam's sign-in pages open in 
 - Gauge refuses to list if the signed-in Steam account isn't the profile being shown.
 - Steam receives the amount *you* get after fees (the `price` field of `/market/sellitem`). The fee math is a direct port of Steam's own and is covered by tests.
 
+## Counter-Strike 2 skins
+
+Every copy of a CS2 skin has the same Market name and price, but not the same value. Its float (how worn it is), its pattern, and what's applied to it tell copies apart. Steam includes these in the inventory itself, so Gauge shows them without extra requests or a third-party inspect service.
+
+- **Where they come from.** Each CS2 item in `/inventory/` arrives with `asset_properties`: its Wear Rating (the float), Pattern Template, Charm Template (for charms), and Item Certificate. The certificate is the same encoded preview block a CS2 inspect link carries. Gauge decodes it on your Mac (`ItemCertificate`) for the finish's paint index, the StatTrak count, name tag, and origin, and every sticker's scrape and charm's pattern. Sticker and charm names come from the item's description.
+- **Inventory.** Tiles show the float and pattern, plus a Doppler's phase, which the Market name leaves out. The detail panel shows the whole float on a bar of the five exteriors, then the pattern, finish, StatTrak count, name tag, origin, stickers, and charm. Sort by Float, type `#661` in search to find a pattern or `0.00` to find floats that start with those digits, and right-click a skin to copy its float or inspect link. If a skin shows no float, right-click it and choose Refresh Item; the status bar then says how many of the game's items came back with a float.
+- **Clean up.** Extra copies keep the lowest float rather than the oldest copy, every skin has its own row with its float, and Doppler phases count as different items. Two rules, shown once an inventory has skins, hold a skin a selling rule picks in **Worth a look**: a float in the cleanest 5% of its exterior (adjustable), and stickers, patches, or a charm applied. Both are on by default.
+- **History.** Steam doesn't say who owned an item before you. The detail panel links to CSFloat's database, filtered to the skin's finish and pattern, where earlier owners of many skins can be found; it opens in your browser, and CSFloat may ask you to sign in. The certificate's origin says how an item came to be, such as unboxed or traded up.
+
+A low float is measured against its whole exterior, 0 to 0.07 for Factory New, so a finish that can't reach 0 never counts as low near its own floor. Per-finish float ranges are in TODO.md.
+
 ## Code map
 
 ```
@@ -88,7 +100,10 @@ gauge/
     SteamProfile.swift     profile links / SteamID64 / vanity parsing, profile XML
     SteamLogin.swift       the sign-in cookie: account, expiry, which pages the sign-in sheet keeps
     InventoryItem.swift    the in-memory item model
-    SteamParsing.swift     inventory pages, the inventory directory, priceoverview, sellitem, sets
+    SteamParsing.swift     inventory pages (with CS2 asset properties), the inventory directory, priceoverview,
+                           sellitem, sets
+    SkinDetails.swift      CS2 floats, patterns, exteriors, Doppler phases, stickers, and charms
+    ItemCertificate.swift  decodes a CS2 item certificate (an inspect link's payload) offline
     InventoryQuery.swift   Inventory tab filtering, sorting, tag facets
     Cleanup.swift          clean-up rules → buckets, extra copies, valuation, price trends
     CleanupRows.swift      the Clean up list: rows per item and bucket, filters, sort, drag payloads
@@ -102,20 +117,22 @@ gauge/
   Persistence/Models.swift SwiftData cache
   Services/                AppModel (state, sync, pricing queue, snapshots, selling, clean-up choices),
                            network activity, UI sessions
-  UI/                      SwiftUI: theme, components, one folder per tab
+  UI/                      SwiftUI: theme, components (including the skin badge, wear bar, and
+                           details), one folder per tab
 gaugeTests/                Swift Testing: fees, parsing, rules, rows, insights, queries, settings,
-                           network log, client with a mock server, model tests on an in-memory store
+                           CS2 skins and certificates, network log, client with a mock server,
+                           model tests on an in-memory store
 ```
 
 ## What was verified, and what wasn't
 
 Gauge is mostly written in an environment without Xcode or network access to Steam, then built and run in Xcode. For the current version:
 
-- `Core/`, `SteamClient`, the network log, and `NetworkActivity` compile with Swift 6.4 on Linux using the project's settings (MainActor default isolation, approachable concurrency), and their tests pass there: 87 tests, including mock-server tests of pagination, 429 back-off, the sell request, and that the network log never records the session cookie or session id.
+- `Core/`, `SteamClient`, the network log, and `NetworkActivity` compile with Swift 6.4 on Linux using the project's settings (MainActor default isolation, approachable concurrency), and their tests pass there: 124 tests, including mock-server tests of pagination, 429 back-off, the sell request, and that the network log never records the session cookie or session id. The certificate decoder is tested against the vectors in CSFloat's inspect serializer, both links it generates and masked links copied from Steam.
 - The services and UI layers are type-checked against stand-ins for SwiftUI, Charts, SwiftData, AppKit, and WebKit, with member import visibility on. The stand-ins follow the SDK's signatures and accept the earlier version of the app that already builds in Xcode. That catches mistakes in Gauge's own code, not every mismatch with Apple's frameworks; CI's Xcode 27 build is the real check.
-- Model tests that need SwiftData or `UndoManager` (demo mode, remembered and undoable clean-up choices) are only type-checked on Linux. CI runs them on macOS 27, and so does ⌘U.
-- Interactions only a Mac can show haven't been seen yet: swipe actions and ⌫ in the Clean up list, dragging rows onto a bucket, the chart's hover readout, and how the Modern theme renders. See TODO.md.
-- Steam response formats come from how the endpoints are known to behave, but they haven't been checked against live responses yet. The most uncertain piece is set detection, which reads the set list from an item's description. See TODO.md.
+- Model tests that need SwiftData or `UndoManager` (demo mode, remembered and undoable clean-up choices, downloading a cached CS2 inventory once more, Refresh Item) are only type-checked on Linux. CI runs them on macOS 27, and so does ⌘U.
+- Interactions only a Mac can show haven't been seen yet: swipe actions and ⌫ in the Clean up list, dragging rows onto a bucket, the chart's hover readout, how the Modern theme renders, and how the skin badge, wear bar, and skin details look. See TODO.md.
+- Steam response formats come from how the endpoints are known to behave, but they haven't been checked against live responses yet. The most uncertain pieces are set detection, which reads the set list from an item's description, and CS2's `asset_properties`, which follow other tools' reading of them (2 is the float, 6 the certificate; 1 and 3 are taken to be the pattern and charm templates, and property names win over numbers). See TODO.md.
 - Signing in follows how Steam's web sign-in is known to work: the `steamLoginSecure` cookie format, its JWT expiry, and renewal through the refresh cookie. The parsing is unit tested; the flow itself hasn't been run against Steam yet.
 
 Not affiliated with or endorsed by Valve Corporation.

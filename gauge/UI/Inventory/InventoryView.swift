@@ -84,17 +84,19 @@ struct InventorySidebar: View {
         @Bindable var browser = model.browser
         let counts = QuickCounts(items: items, facts: facts)
         let facets = TagCategoryFacet.facets(for: items)
+        let skins = model.context(for: contextKey)?.appID == SkinDetailsReader.appID
 
         VStack(alignment: .leading, spacing: 10) {
             contextButton(p)
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(p.mutedText)
-                TextField("Search items or heroes", text: $browser.query.search)
+                TextField(skins ? "Search, #pattern, or 0.0 float" : "Search items or heroes", text: $browser.query.search)
                     .textFieldStyle(.plain)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
             .classicInset(p)
+            .help(skins ? "Search by name, type #661 for a pattern, or 0.00 for floats that start with those digits" : "")
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 5) {
@@ -306,6 +308,10 @@ struct SelectionBar: View {
         let selected = shown.filter { browser.selection.contains($0.id) }
         let buyerTotal = selected.reduce(0) { $0 + (facts.value(of: $1) ?? 0) * $1.amount }
         let sellable = selected.filter(\.marketable)
+        // Float sorting only means something for CS2 skins.
+        let sorts = InventorySort.allCases.filter { sort in
+            sort != .float || browser.query.sort == .float || shown.contains { $0.wear != nil }
+        }
 
         HStack(spacing: 8) {
             if selected.isEmpty {
@@ -325,7 +331,7 @@ struct SelectionBar: View {
             .help("Select every shown item worth less than \(Money.format(model.settings.fluffThresholdCents, model.currency)) that isn't starred")
             PopoverPicker(
                 title: "Sort: \(browser.query.sort.title)",
-                options: InventorySort.allCases.map { PickerOption(value: $0, label: $0.title) },
+                options: sorts.map { PickerOption(value: $0, label: $0.title) },
                 selection: browser.query.sort,
                 palette: p
             ) { browser.query.sort = $0 }
@@ -426,6 +432,16 @@ struct ItemGrid: View {
                         if let url = item.marketURL, item.marketable {
                             Button("View on Market") { openURL(url) }
                         }
+                        if let skin = item.skin {
+                            if let wear = skin.wear {
+                                Button("Copy Float") { copy(FloatText.full(wear)) }
+                            }
+                            if let link = skin.inspectLink {
+                                Button("Copy Inspect Link") { copy(link) }
+                            }
+                        }
+                        Button("Refresh Item") { Task { await model.refresh(item) } }
+                            .disabled(!model.canRefreshItems)
                         Button("Sell…") { onSell(item) }
                             .disabled(!item.marketable)
                     }
@@ -434,6 +450,11 @@ struct ItemGrid: View {
             .padding(8)
         }
         .classicInset(p)
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func select(_ item: InventoryItem) {
@@ -485,6 +506,10 @@ struct ItemTile: View {
                         .background(p.inset.opacity(0.85))
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                         .padding(4)
+                } else if let skin = item.skin, skin.wear != nil || skin.pattern != nil {
+                    FloatBadge(skin: skin, palette: p)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(4)
                 }
             }
             .frame(height: 74)
@@ -524,41 +549,48 @@ struct ItemDetailPanel: View {
             let quote = model.quote(for: item)
             let starred = model.isStarred(item)
             VStack(alignment: .leading, spacing: 9) {
-                ItemArtwork(item: item, size: 256, palette: p)
-                    .frame(height: 150)
-                    .frame(maxWidth: .infinity)
-                    .classicInset(p)
-                    .overlay(alignment: .bottom) { p.rarity(item).frame(height: 3) }
-                Text(item.name)
-                    .font(p.font(16, .bold))
-                    .fixedSize(horizontal: false, vertical: true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(item.subtitle) · \(model.context(for: item.contextKey)?.name ?? "")")
-                        .foregroundStyle(p.rarity(item))
-                    if let hero = item.usedBy {
-                        Text("Used by \(hero)").foregroundStyle(p.secondaryText)
-                    }
-                    if item.amount > 1 {
-                        Text("Stack of \(item.amount.formatted())").foregroundStyle(p.secondaryText)
-                    }
-                }
-                Button(starred ? "★ Starred · always kept" : "☆ Star this item") { model.toggleStar(item) }
-                    .classicButton(.card, p)
-                if let set = item.itemSet {
-                    Text("SET: \(set.name.uppercased()) (you own \(model.ownership.owned(set, appID: item.appID)) of \(set.members.count))")
-                        .foregroundStyle(p.accent)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                priceBox(item, quote: quote, p)
-                if !item.marketable {
-                    Text("This item can't be sold on the Community Market.")
-                        .foregroundStyle(p.mutedText)
-                }
+                // Everything but the buttons scrolls, since a skin's details make the panel tall.
                 ScrollView {
-                    Text(item.details.filter { !$0.hasPrefix("Used By:") }.prefix(12).joined(separator: "\n"))
-                        .font(p.font(11))
-                        .foregroundStyle(p.secondaryText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 9) {
+                        ItemArtwork(item: item, size: 256, palette: p)
+                            .frame(height: 150)
+                            .frame(maxWidth: .infinity)
+                            .classicInset(p)
+                            .overlay(alignment: .bottom) { p.rarity(item).frame(height: 3) }
+                        Text(item.name)
+                            .font(p.font(16, .bold))
+                            .fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("\(item.subtitle) · \(model.context(for: item.contextKey)?.name ?? "")")
+                                .foregroundStyle(p.rarity(item))
+                            if let hero = item.usedBy {
+                                Text("Used by \(hero)").foregroundStyle(p.secondaryText)
+                            }
+                            if item.amount > 1 {
+                                Text("Stack of \(item.amount.formatted())").foregroundStyle(p.secondaryText)
+                            }
+                        }
+                        Button(starred ? "★ Starred · always kept" : "☆ Star this item") { model.toggleStar(item) }
+                            .classicButton(.card, p)
+                        if let set = item.itemSet {
+                            Text("SET: \(set.name.uppercased()) (you own \(model.ownership.owned(set, appID: item.appID)) of \(set.members.count))")
+                                .foregroundStyle(p.accent)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        if let skin = item.skin {
+                            SkinDetailsBox(skin: skin, palette: p)
+                        }
+                        priceBox(item, quote: quote, p)
+                        if !item.marketable {
+                            Text("This item can't be sold on the Community Market.")
+                                .foregroundStyle(p.mutedText)
+                        }
+                        Text(item.details.filter { !$0.hasPrefix("Used By:") }.prefix(12).joined(separator: "\n"))
+                            .font(p.font(11))
+                            .foregroundStyle(p.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 HStack(spacing: 8) {
                     Button("View on Market") {

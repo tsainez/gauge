@@ -24,7 +24,11 @@ extension AppModel {
 
     func schedulerTick() async {
         guard settings.profile != nil, !settings.demoMode else { return }
-        if inventoryCheckIsDue {
+        // After an update, inventories cached by the older version are checked at launch,
+        // not hours later when the next check is due. Once a launch, so a failure waits.
+        let upgrade = inventoriesAreOutdated && !checkedOutdatedInventories && settings.inventoryCheck.seconds != nil
+        if inventoryCheckIsDue || upgrade {
+            checkedOutdatedInventories = true
             await syncInventories(force: false)
         } else {
             rebuildPricingQueue()
@@ -38,12 +42,25 @@ extension AppModel {
         return Date().timeIntervalSince(lastInventoryCheck) >= interval
     }
 
+    /// Whether a cached inventory is missing what this version reads out of it (CS2 floats and patterns).
+    var inventoriesAreOutdated: Bool {
+        defaults.integer(forKey: Self.inventoryFormatKey) < Self.inventoryFormat
+            && contexts.contains { $0.appID == SkinDetailsReader.appID }
+    }
+
+    /// Bumped when Gauge reads more out of an inventory than before, so inventories
+    /// cached by an older version are downloaded once more. 2: CS2 floats and patterns.
+    static let inventoryFormat = 2
+    static let inventoryFormatKey = "GaugeInventoryFormat"
+
     /// Refreshes inventories from Steam. With `force`, every inventory is re-downloaded.
     func syncInventories(force: Bool) async {
         guard let profile = settings.profile, !settings.demoMode, !syncPhase.isBusy else { return }
         notice = nil
         syncPhase = .discovering
         let auth = await ownerAuth(for: profile)
+        let outdated = defaults.integer(forKey: Self.inventoryFormatKey) < Self.inventoryFormat
+        var upgraded = true
 
         var directory: [InventoryContext]
         var directoryIsComplete = true
@@ -64,7 +81,9 @@ extension AppModel {
             if settings.demoMode { return }
             let cached = itemsByContext[context.id]
             let unchanged = cached != nil && self.context(for: context.id)?.assetCount == context.assetCount
-            if !force && directoryIsComplete && unchanged {
+            // Only CS2 inventories gained anything from the last format change.
+            let upgrading = outdated && cached != nil && context.appID == SkinDetailsReader.appID
+            if !force && directoryIsComplete && unchanged && !upgrading {
                 refreshed.append(context)
                 continue
             }
@@ -88,10 +107,12 @@ extension AppModel {
                 refreshed.append(contentsOf: directory.filter { candidate in
                     !refreshed.contains { $0.id == candidate.id } && itemsByContext[candidate.id] != nil
                 })
+                upgraded = false
                 break
             } catch {
                 contextStatus[context.id, default: ContextStatus()].error = error.localizedDescription
                 if cached != nil { refreshed.append(context) }
+                if upgrading { upgraded = false }
                 // While probing guessed games, a 403 just means there's nothing there.
                 if directoryIsComplete, let failure = error as? SteamClient.Failure, failure == .privateInventory {
                     notice = auth == nil
@@ -113,6 +134,9 @@ extension AppModel {
 
         lastInventoryCheck = Date()
         defaults.set(lastInventoryCheck, forKey: Self.lastCheckKey)
+        if outdated && upgraded {
+            defaults.set(Self.inventoryFormat, forKey: Self.inventoryFormatKey)
+        }
         syncPhase = .idle
         rebuildDerived()
         pruneCleanupOverrides()
@@ -188,6 +212,98 @@ extension AppModel {
         }
         contexts.removeAll { !keep.contains($0.id) }
         try? modelContext.save()
+    }
+}
+
+// MARK: - Refreshing one item
+
+extension AppModel {
+    /// Whether Refresh Item can run: a real profile, and no inventory download already going.
+    var canRefreshItems: Bool {
+        settings.profile != nil && !settings.demoMode && !syncPhase.isBusy
+    }
+
+    /// Refresh Item: downloads the item's inventory again and re-checks its price. Steam
+    /// can't send one item on its own, so the whole inventory for its game comes down,
+    /// which also brings every CS2 skin's float and pattern up to date.
+    func refresh(_ item: InventoryItem) async {
+        guard await refreshInventory(contextKey: item.contextKey) else { return }
+        // Price the item as it is now; it may have left the inventory.
+        if let current = self.item(withID: item.id), current.marketable {
+            await refreshPrice(for: current)
+        }
+    }
+
+    /// Downloads one inventory again right away, whether or not its item count changed,
+    /// and says in the status bar what came back. Returns whether it worked.
+    @discardableResult
+    func refreshInventory(contextKey: String) async -> Bool {
+        guard canRefreshItems, let profile = settings.profile, let context = context(for: contextKey) else { return false }
+        notice = nil
+        syncPhase = .loading(name: context.name, loaded: 0, total: context.assetCount > 0 ? context.assetCount : nil)
+        let auth = await ownerAuth(for: profile)
+        do {
+            let name = context.name
+            let items = try await client.inventory(steamID64: profile.steamID64, context: context, auth: auth) { loaded, total in
+                Task { @MainActor [weak self] in
+                    guard let self, self.syncPhase.isBusy, !self.settings.demoMode else { return }
+                    self.syncPhase = .loading(name: name, loaded: loaded, total: total)
+                }
+            }
+            guard !settings.demoMode else { return false }
+            var updated = context
+            updated.assetCount = items.count
+            await store(items, for: updated)
+            if let index = contexts.firstIndex(where: { $0.id == contextKey }) {
+                contexts[index] = updated
+            }
+            syncPhase = .idle
+            rebuildDerived()
+            pruneCleanupOverrides()
+            rebuildPricingQueue()
+            ensurePricing()
+            showNotice(Self.refreshSummary(name: context.name, appID: context.appID, items: items))
+            return true
+        } catch {
+            syncPhase = .idle
+            contextStatus[contextKey, default: ContextStatus()].error = error.localizedDescription
+            notice = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Checks one item's price now, even if the last check was recent.
+    func refreshPrice(for item: InventoryItem) async {
+        guard item.marketable, !settings.demoMode else { return }
+        do {
+            let quote = try await client.priceOverview(appID: item.appID, marketHashName: item.marketHashName, currency: settings.currency)
+            guard !settings.demoMode else { return }
+            failedPriceKeys[item.priceKey] = nil
+            store(quote, for: item.priceKey)
+            recomputeTrends()
+            recordSnapshot()
+        } catch SteamClient.Failure.rateLimited(let wait) {
+            pricingPausedUntil = Date().addingTimeInterval(wait)
+        } catch {
+            // The old price stays; the pricing queue tries again later.
+        }
+    }
+
+    /// "Counter-Strike 2 refreshed: 245 items, 180 with a float"
+    static func refreshSummary(name: String, appID: Int, items: [InventoryItem]) -> String {
+        let count = "\(items.count.formatted()) item\(items.count == 1 ? "" : "s")"
+        guard appID == SkinDetailsReader.appID else { return "\(name) refreshed: \(count)" }
+        let floats = items.filter { $0.wear != nil }.count
+        return "\(name) refreshed: \(count), \(floats == 0 ? "none" : floats.formatted()) with a float"
+    }
+
+    /// Shows a message in the status bar for a few seconds.
+    func showNotice(_ message: String, seconds: Double = 8) {
+        notice = message
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            if self?.notice == message { self?.notice = nil }
+        }
     }
 }
 

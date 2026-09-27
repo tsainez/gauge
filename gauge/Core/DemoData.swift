@@ -43,6 +43,9 @@ nonisolated enum DemoData {
         for (index, other) in otherApps.enumerated() {
             builder.simpleApp(appID: other.appID, name: other.name, count: [4, 3, 2, 2, 2, 1][index], marketableShare: 0.7, pool: other.pool, rng: &rng)
         }
+        // Skins draw from their own generator, so every other game's items stay as they were.
+        var skinRNG = SplitMix64(seed: seed ^ 0xC5_2A_11)
+        builder.cs2Skins(rng: &skinRNG)
 
         let starred = builder.itemsByContext["570_2"]?
             .filter { $0.name == "Songs of the Caravan Music Pack" || $0.name == "Song of the Solstice Arms" }
@@ -152,6 +155,80 @@ nonisolated enum DemoData {
         ("Recoil Case", 45), ("Dreams & Nightmares Case", 110), ("Sticker | Glitter Gun", 6), ("Sealed Graffiti | Heart", 3),
         ("Fracture Case", 38), ("Sticker | Bronze Ace", 21), ("Kilowatt Case", 72), ("Revolution Case", 64),
     ]
+    /// A CS2 skin and the copies owned, each with its own float and pattern.
+    struct DemoSkin {
+        var name: String
+        var type: String
+        var rarity: Int
+        var defIndex: Int
+        var paintIndex: Int
+        var cents: Int
+        var copies: [SkinDetails]
+        /// Description lines, such as the names of applied stickers.
+        var details: [String] = []
+    }
+
+    static let cs2Rarities: [(name: String, color: String)] = [
+        ("Consumer Grade", "b0c3d9"), ("Industrial Grade", "5e98d9"), ("Mil-Spec Grade", "4b69ff"),
+        ("Restricted", "8847ff"), ("Classified", "d32ce6"), ("Covert", "eb4b4b"),
+    ]
+
+    /// Drops worth cents with floats spread across their wear, a few low floats, stickers,
+    /// StatTrak, a name tag, a blue gem pattern, and Doppler phases that share a name.
+    static let cs2Skins: [DemoSkin] = [
+        DemoSkin(name: "P250 | Sand Dune (Factory New)", type: "Pistol", rarity: 0, defIndex: 36, paintIndex: 99, cents: 12, copies: [
+            SkinDetails(wear: 0.000_812_455_4, pattern: 311, origin: 24),
+            SkinDetails(wear: 0.031_428_571, pattern: 87, origin: 24),
+            SkinDetails(wear: 0.052_734_375, pattern: 902, origin: 24),
+            SkinDetails(wear: 0.066_210_938, pattern: 455, origin: 0),
+        ]),
+        DemoSkin(name: "MP9 | Sand Dashed (Field-Tested)", type: "SMG", rarity: 0, defIndex: 34, paintIndex: 148, cents: 4, copies: [
+            SkinDetails(wear: 0.210_937_5, pattern: 12, origin: 24),
+            SkinDetails(wear: 0.334_562_1, pattern: 640, origin: 24),
+            SkinDetails(wear: 0.281_25, pattern: 377, origin: 24),
+        ]),
+        DemoSkin(name: "SG 553 | Waves Perforated (Minimal Wear)", type: "Rifle", rarity: 0, defIndex: 39, paintIndex: 186, cents: 6, copies: [
+            SkinDetails(wear: 0.071_184_2, pattern: 229, origin: 24),
+            SkinDetails(wear: 0.124_512_7, pattern: 815, origin: 24),
+        ]),
+        DemoSkin(name: "UMP-45 | Mudder (Battle-Scarred)", type: "SMG", rarity: 0, defIndex: 24, paintIndex: 90, cents: 3, copies: [
+            SkinDetails(wear: 0.451_171_9, pattern: 54, origin: 24),
+        ]),
+        DemoSkin(name: "Nova | Predator (Field-Tested)", type: "Shotgun", rarity: 1, defIndex: 35, paintIndex: 170, cents: 5, copies: [
+            SkinDetails(wear: 0.184_326_2, pattern: 703, origin: 24),
+            SkinDetails(wear: 0.366_210_9, pattern: 31, origin: 24),
+        ]),
+        DemoSkin(name: "MP9 | Sand Dashed (Minimal Wear)", type: "SMG", rarity: 0, defIndex: 34, paintIndex: 148, cents: 9, copies: [
+            SkinDetails(wear: 0.098_144_5, pattern: 488, origin: 24, stickers: [SkinAccessory(slot: 0, name: "Bronze Ace", wear: 0.42)]),
+        ], details: ["Sticker: Bronze Ace"]),
+        DemoSkin(name: "Five-SeveN | Case Hardened (Field-Tested)", type: "Pistol", rarity: 2, defIndex: 3, paintIndex: 44, cents: 410, copies: [
+            SkinDetails(wear: 0.227_893_4, pattern: 278, origin: 8),
+        ]),
+        DemoSkin(name: "Glock-18 | Water Elemental (Minimal Wear)", type: "Pistol", rarity: 4, defIndex: 4, paintIndex: 353, cents: 340, copies: [
+            SkinDetails(wear: 0.112_304_7, pattern: 610, nameTag: "Splash Zone", origin: 8),
+        ]),
+        DemoSkin(name: "AK-47 | Redline (Field-Tested)", type: "Rifle", rarity: 4, defIndex: 7, paintIndex: 282, cents: 2_390, copies: [
+            SkinDetails(wear: 0.152_893_1, pattern: 118, origin: 4),
+            SkinDetails(wear: 0.347_122_8, pattern: 926, origin: 8, stickers: [
+                SkinAccessory(slot: 0, name: "Crown (Foil)"),
+                SkinAccessory(slot: 2, name: "Titan (Holo) | Katowice 2014", wear: 0.12),
+            ]),
+        ], details: ["Sticker: Crown (Foil), Titan (Holo) | Katowice 2014"]),
+        DemoSkin(name: "StatTrak™ M4A1-S | Decimator (Field-Tested)", type: "Rifle", rarity: 5, defIndex: 60, paintIndex: 644, cents: 1_820, copies: [
+            SkinDetails(wear: 0.201_171_9, pattern: 47, statTrak: 1_337, origin: 8),
+        ]),
+        DemoSkin(name: "AK-47 | Case Hardened (Field-Tested)", type: "Rifle", rarity: 4, defIndex: 7, paintIndex: 44, cents: 15_400, copies: [
+            SkinDetails(wear: 0.257_324_2, pattern: 661, origin: 8),
+        ]),
+        DemoSkin(name: "USP-S | Cortex (Field-Tested)", type: "Pistol", rarity: 4, defIndex: 61, paintIndex: 705, cents: 260, copies: [
+            SkinDetails(wear: 0.293_457, pattern: 390, origin: 8, charms: [SkinAccessory(slot: 0, name: "Lil' Squirt", pattern: 12_411)]),
+        ], details: ["Charm: Lil' Squirt"]),
+        DemoSkin(name: "★ Karambit | Doppler (Factory New)", type: "Knife", rarity: 5, defIndex: 507, paintIndex: 418, cents: 88_000, copies: [
+            SkinDetails(wear: 0.010_253_9, pattern: 412, paintIndex: 415, origin: 8),
+            SkinDetails(wear: 0.030_151_4, pattern: 77, paintIndex: 419, origin: 8),
+        ]),
+    ]
+
     static let kf2Names = [
         ("Vault Crate | Series 3", 4), ("Cosmetic Crate | Hunter", 3), ("Weapon Skin | Chrome Katana", 18),
         ("Vault Ticket", 99), ("Emote | Victory Stomp", 6),
@@ -324,6 +401,41 @@ nonisolated enum DemoData {
                 price(PriceKey.make(appID: appID, marketHashName: pick.0), base: base, rng: &rng)
             }
             add(items, appID: appID, name: name)
+        }
+
+        /// Adds the skins to the CS2 inventory, with their exterior, rarity, and weapon type as Steam tags them.
+        mutating func cs2Skins(rng: inout SplitMix64) {
+            let key = InventoryContext.key(appID: 730, contextID: "2")
+            var items = itemsByContext[key] ?? []
+            for skin in DemoData.cs2Skins {
+                let rarity = DemoData.cs2Rarities[skin.rarity]
+                let quality: (name: String, color: String) = skin.name.hasPrefix("★") ? ("★", "8650AC")
+                    : skin.name.hasPrefix("StatTrak™") ? ("StatTrak™", "CF6A32") : ("Normal", "D2D2D2")
+                let prefix = quality.name == "Normal" ? "" : quality.name + " "
+                for copy in skin.copies {
+                    var details = copy
+                    details.defIndex = skin.defIndex
+                    details.paintIndex = details.paintIndex ?? skin.paintIndex
+                    let exterior = Exterior.of(details.wear ?? 0)
+                    let tags = [
+                        ItemTag(category: "Type", categoryName: "Type", internalName: skin.type, name: skin.type, color: nil),
+                        ItemTag(category: "Quality", categoryName: "Category", internalName: quality.name, name: quality.name, color: quality.color),
+                        ItemTag(category: "Rarity", categoryName: "Quality", internalName: rarity.name, name: rarity.name, color: rarity.color),
+                        ItemTag(category: "Exterior", categoryName: "Exterior", internalName: exterior.title, name: exterior.title, color: nil),
+                    ]
+                    items.append(InventoryItem(
+                        appID: 730, contextID: "2", assetID: asset(), classID: String(DemoData.stableHash(skin.name) % 9_000_000), instanceID: "0",
+                        amount: 1, name: skin.name, baseName: skin.name, marketHashName: skin.name, type: "\(prefix)\(rarity.name) \(skin.type)",
+                        iconHash: nil, nameColor: quality.name == "Normal" ? nil : quality.color, marketable: true, tradable: true, commodity: false,
+                        tags: tags, details: ["Exterior: \(exterior.title)"] + skin.details, itemSet: nil, skin: details
+                    ))
+                }
+                price(PriceKey.make(appID: 730, marketHashName: skin.name), base: skin.cents, rng: &rng)
+            }
+            itemsByContext[key] = items
+            if let index = contexts.firstIndex(where: { $0.id == key }) {
+                contexts[index].assetCount = items.count
+            }
         }
 
         func snapshots(rng: inout SplitMix64) -> [DemoSnapshot] {

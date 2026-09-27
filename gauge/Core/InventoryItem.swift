@@ -73,6 +73,8 @@ nonisolated struct InventoryItem: Codable, Hashable, Sendable, Identifiable {
     /// Plain-text description lines, blank lines removed.
     var details: [String]
     var itemSet: ItemSetInfo?
+    /// Counter-Strike 2 only: this copy's float, pattern, finish, and stickers.
+    var skin: SkinDetails? = nil
 
     var id: String { Self.key(appID: appID, contextID: contextID, assetID: assetID) }
 
@@ -80,6 +82,18 @@ nonisolated struct InventoryItem: Codable, Hashable, Sendable, Identifiable {
 
     var contextKey: String { InventoryContext.key(appID: appID, contextID: contextID) }
     var priceKey: String { PriceKey.make(appID: appID, marketHashName: marketHashName) }
+
+    /// Copies of the same item: the same Market name and, for a Doppler, the same phase.
+    var copyKey: String {
+        guard let phase = skin?.phase else { return priceKey }
+        return priceKey + "|" + phase
+    }
+
+    /// The float, for CS2 items that have one.
+    var wear: Double? { skin?.wear }
+
+    /// Whether this copy differs from others with the same name: a CS2 float or pattern.
+    var isOneOfAKind: Bool { skin?.wear != nil || skin?.pattern != nil }
 
     func tag(_ category: String) -> ItemTag? {
         tags.first { $0.category == category }
@@ -113,6 +127,21 @@ nonisolated struct InventoryItem: Codable, Hashable, Sendable, Identifiable {
     var marketURL: URL? {
         let name = PriceKey.percentEncode(marketHashName)
         return URL(string: "https://steamcommunity.com/market/listings/\(appID)/\(name)")
+    }
+
+    /// Whether a search box's text finds this item. Besides names, heroes, and types,
+    /// "#661" finds CS2 items with that pattern, and "0.00" finds floats starting with those digits.
+    func matches(search needle: String) -> Bool {
+        guard !needle.isEmpty else { return true }
+        if needle.hasPrefix("#"), let pattern = Int(needle.dropFirst()) {
+            return skin?.pattern == pattern
+        }
+        if needle.hasPrefix("0."), needle.dropFirst(2).allSatisfy(\.isNumber) {
+            return wear.map { FloatText.full($0).hasPrefix(needle) } ?? false
+        }
+        return name.lowercased().contains(needle)
+            || type.lowercased().contains(needle)
+            || (usedBy?.lowercased().contains(needle) ?? false)
     }
 }
 
