@@ -64,6 +64,17 @@ struct InventoryQueryTests {
         #expect(query.apply(to: items, facts: facts).first?.name == "Crown of Dusk")
     }
 
+    @Test func ascendingTogglesDirection() {
+        var query = InventoryQuery()
+        query.sort = .rarity
+        query.ascending = true
+        #expect(query.apply(to: items, facts: facts).last?.name == "Crown of Dusk")
+
+        query.sort = .name
+        query.ascending = false
+        #expect(query.apply(to: items, facts: facts).first?.name == "Old Treasure")
+    }
+
     @Test func buildsFacetsInSidebarOrder() {
         let facets = TagCategoryFacet.facets(for: items)
         #expect(facets.map(\.category) == ["Rarity", "Slot"])

@@ -31,7 +31,7 @@ final class InventoryBrowser {
     /// Opens the Inventory tab on one game with a preset filter, used by Portfolio shortcuts.
     func show(contextKey: String?, quick: Set<QuickFilter> = [.marketable], search: String = "") {
         if let contextKey { self.contextKey = contextKey }
-        query = InventoryQuery(search: search, quick: quick, tags: [:], sort: query.sort)
+        query = InventoryQuery(search: search, quick: quick, tags: [:], sort: query.sort, ascending: query.ascending)
         selection = []
     }
 

@@ -36,6 +36,16 @@ nonisolated enum InventorySort: String, Codable, CaseIterable, Identifiable, Sen
         case .newest: "Newest"
         }
     }
+
+    /// Whether this sort reads ascending (low-to-high, A-Z, oldest-first) by default.
+    var defaultAscending: Bool {
+        switch self {
+        case .value: false
+        case .name: true
+        case .rarity: false
+        case .newest: false
+        }
+    }
 }
 
 /// What the filters need to know beyond the items themselves.
@@ -70,7 +80,13 @@ nonisolated struct InventoryQuery: Equatable, Sendable {
     var quick: Set<QuickFilter> = []
     /// Checked tag values (by display name) for each category id.
     var tags: [String: Set<String>] = [:]
-    var sort: InventorySort = .value
+    var sort: InventorySort = .value {
+        didSet {
+            guard oldValue != sort else { return }
+            ascending = sort.defaultAscending
+        }
+    }
+    var ascending: Bool = InventorySort.value.defaultAscending
 
     var isEmpty: Bool { search.isEmpty && quick.isEmpty && tags.values.allSatisfy(\.isEmpty) }
 
@@ -109,19 +125,25 @@ nonisolated struct InventoryQuery: Equatable, Sendable {
             let values = Dictionary(items.map { ($0.id, facts.value(of: $0) ?? -1) }, uniquingKeysWith: { first, _ in first })
             return items.sorted { lhs, rhs in
                 let l = values[lhs.id] ?? -1, r = values[rhs.id] ?? -1
-                return l != r ? l > r : lhs.name < rhs.name
+                return l != r ? (ascending ? l < r : l > r) : lhs.name < rhs.name
             }
         case .name:
-            return items.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            return items.sorted { lhs, rhs in
+                let order = lhs.name.localizedStandardCompare(rhs.name)
+                return ascending ? order == .orderedAscending : order == .orderedDescending
+            }
         case .rarity:
             return items.sorted { lhs, rhs in
                 let l = RarityOrder.rank(lhs.rarity?.name), r = RarityOrder.rank(rhs.rarity?.name)
-                return l != r ? l > r : lhs.name < rhs.name
+                return l != r ? (ascending ? l < r : l > r) : lhs.name < rhs.name
             }
         case .newest:
             // Asset ids grow over time, so the longest/largest id is the most recent.
             return items.sorted { lhs, rhs in
-                lhs.assetID.count != rhs.assetID.count ? lhs.assetID.count > rhs.assetID.count : lhs.assetID > rhs.assetID
+                if lhs.assetID.count != rhs.assetID.count {
+                    return ascending ? lhs.assetID.count < rhs.assetID.count : lhs.assetID.count > rhs.assetID.count
+                }
+                return ascending ? lhs.assetID < rhs.assetID : lhs.assetID > rhs.assetID
             }
         }
     }
