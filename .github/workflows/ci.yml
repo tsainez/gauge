@@ -1,0 +1,116 @@
+# Builds and tests Gauge on every pull request and every push to main.
+#
+# Gauge targets macOS 27. Building it needs the macOS 27 SDK (Xcode 27), and its
+# unit tests run inside the app, so they need a Mac running macOS 27. GitHub's
+# `xcode-27` image is the only hosted runner with both: `macos-latest` is macOS 26
+# with Xcode 26. The image is in public preview, so a run can wait in the queue.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A new push to a pull request replaces the run in progress. Runs on main all
+  # finish, so every commit there keeps its result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Keep this in step with the Xcode you build with.
+  DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer
+
+defaults:
+  run:
+    # Naming bash explicitly turns on pipefail, so piping through xcbeautify
+    # can't hide an xcodebuild failure.
+    shell: bash
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      # Signing is off: the runner has no certificates, and the tests don't need
+      # the sandbox. xcbeautify turns errors and test failures into annotations.
+      - name: Build
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          xcodebuild build-for-testing \
+            -project gauge.xcodeproj \
+            -scheme gauge \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee "$RUNNER_TEMP/logs/build.log" | xcbeautify --renderer github-actions
+
+      # The UI tests are still Xcode's template. Drop -skip-testing once they
+      # exercise Gauge (TODO.md, Engineering).
+      - name: Run unit tests
+        run: |
+          xcodebuild test-without-building \
+            -project gauge.xcodeproj \
+            -scheme gauge \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/gauge-tests.xcresult" \
+            -skip-testing:gaugeUITests \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$RUNNER_TEMP/logs/test.log" | xcbeautify --renderer github-actions
+
+      # The raw logs keep what xcbeautify leaves out; open the .xcresult in Xcode.
+      - name: Upload logs and test results
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-results
+          path: |
+            ${{ runner.temp }}/logs
+            ${{ runner.temp }}/gauge-tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Archives the Release configuration, as a release would, but unsigned. Code
+  # that only compiles in Debug (say, a preview helper used outside #if DEBUG)
+  # fails here instead of when you try to ship.
+  release-build:
+    name: Release build
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - name: Archive
+        run: |
+          xcodebuild archive \
+            -project gauge.xcodeproj \
+            -scheme gauge \
+            -destination 'generic/platform=macOS' \
+            -archivePath "$RUNNER_TEMP/gauge.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | xcbeautify --renderer github-actions
