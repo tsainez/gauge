@@ -328,10 +328,7 @@ struct SelectionBar: View {
                 options: InventorySort.allCases.map { PickerOption(value: $0, label: $0.title) },
                 selection: browser.query.sort,
                 palette: p
-            ) {
-                browser.query.sort = $0
-                browser.query.ascending = $0.defaultAscending
-            }
+            ) { browser.query.sort = $0 }
             Button {
                 browser.query.ascending.toggle()
             } label: {

@@ -80,7 +80,12 @@ nonisolated struct InventoryQuery: Equatable, Sendable {
     var quick: Set<QuickFilter> = []
     /// Checked tag values (by display name) for each category id.
     var tags: [String: Set<String>] = [:]
-    var sort: InventorySort = .value
+    var sort: InventorySort = .value {
+        didSet {
+            guard oldValue != sort else { return }
+            ascending = sort.defaultAscending
+        }
+    }
     var ascending: Bool = InventorySort.value.defaultAscending
 
     var isEmpty: Bool { search.isEmpty && quick.isEmpty && tags.values.allSatisfy(\.isEmpty) }
