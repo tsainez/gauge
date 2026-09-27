@@ -38,7 +38,9 @@ extension AppModel {
         }
         guard let profile = settings.profile else { return }
         guard let auth = await web.auth() else {
-            run.haltMessage = "Sign in to Steam to list items."
+            run.haltMessage = web.status.hasExpired
+                ? "Your Steam sign-in expired and Gauge couldn't renew it. Sign in again, then resume."
+                : "Sign in with Steam to list items."
             return
         }
         guard auth.steamID64 == profile.steamID64 else {
@@ -105,7 +107,7 @@ extension AppModel {
             } catch SteamClient.Failure.http(let code) where code == 401 || code == 403 {
                 run.jobs[index].state = .queued
                 run.haltMessage = "Steam didn't accept the sign-in. Sign in again, then resume."
-                await web.refresh()
+                await web.refresh(renewIfNeeded: false)
                 break
             } catch {
                 run.jobs[index].state = .failed(error.localizedDescription)

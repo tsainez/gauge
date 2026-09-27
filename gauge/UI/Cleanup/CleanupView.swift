@@ -56,7 +56,7 @@ struct CleanupView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .sheet(isPresented: $showingSignIn) {
-            SteamSignInSheet().environment(model)
+            SteamSignInSheet(purpose: .listing).environment(model)
         }
     }
 

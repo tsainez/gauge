@@ -34,7 +34,13 @@ struct SettingsView: View {
             }
         }
         .sheet(isPresented: $showingSignIn) {
-            SteamSignInSheet().environment(model)
+            SteamSignInSheet(purpose: .account) { steamID in
+                // A private inventory may have been out of reach until now.
+                if steamID == model.settings.profile?.steamID64 {
+                    Task { await model.syncInventories(force: false) }
+                }
+            }
+            .environment(model)
         }
         .confirmationDialog("Clear everything Gauge has saved on this Mac?", isPresented: $confirmingClear) {
             Button("Clear Local Data", role: .destructive) { clearData() }
@@ -219,20 +225,17 @@ struct SettingsView: View {
             }
             if !model.settings.demoMode {
                 HStack {
-                    if let id = model.web.signedInSteamID {
-                        let matches = id == model.settings.profile?.steamID64
-                        Text(matches ? "Signed in for selling." : "Signed in for selling as \(id), which isn't the profile above.")
-                            .foregroundStyle(matches ? p.text : p.negative)
-                    } else {
-                        Text("Not signed in. Only needed to list items; browsing and prices work without it.")
-                            .foregroundStyle(p.secondaryText)
-                    }
+                    signInSummary(p)
+                        .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     if model.web.isSignedIn {
                         Button("Sign out of Steam") { Task { await model.web.signOut() } }
                             .classicButton(.secondary, p)
+                    } else if model.web.status.hasExpired {
+                        Button("Sign in again…") { showingSignIn = true }
+                            .classicButton(.primary, p)
                     } else {
-                        Button("Sign in…") { showingSignIn = true }
+                        Button("Sign in with Steam…") { showingSignIn = true }
                             .classicButton(.secondary, p)
                     }
                 }
@@ -240,6 +243,28 @@ struct SettingsView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func signInSummary(_ p: Palette) -> some View {
+        let text: String
+        var color = p.secondaryText
+        if let id = model.web.signedInSteamID {
+            if id == model.settings.profile?.steamID64 {
+                text = model.web.isRenewing
+                    ? "Signed in with Steam. Renewing the session…"
+                    : "Signed in with Steam. Gauge can read your inventory even when it's private, and list items. The session renews on its own."
+                color = p.text
+            } else {
+                text = "Signed in to Steam as \(id), which isn't the profile above. Gauge won't use it to read inventories or list items."
+                color = p.negative
+            }
+        } else if model.web.status.hasExpired {
+            text = "Your Steam sign-in ran out and couldn't be renewed. Sign in again to list items or read a private inventory."
+            color = p.negative
+        } else {
+            text = "Not signed in. Only needed to list items or to read a private inventory; public inventories and prices work without it."
+        }
+        return Text(text).foregroundStyle(color)
     }
 
     // MARK: - Data

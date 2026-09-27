@@ -159,7 +159,8 @@ final class AppModel {
             return
         }
         await loadCache()
-        await web.refresh()
+        // A quick look at the cookies; the first sync renews the session if it needs it.
+        await web.refresh(renewIfNeeded: false)
         startScheduler()
     }
 
@@ -321,6 +322,16 @@ final class AppModel {
 
     // MARK: - Profile
 
+    /// Shows the account the user just signed in to Steam with.
+    /// Returns an error message to show, or nil on success.
+    func connectSignedInAccount() async -> String? {
+        await web.refresh(renewIfNeeded: false)
+        guard let steamID = web.signedInSteamID else {
+            return "Steam didn't finish signing you in. Try again."
+        }
+        return await connect(to: steamID)
+    }
+
     /// Resolves what the user typed and loads that profile's inventories.
     /// Returns an error message to show, or nil on success.
     func connect(to input: String) async -> String? {
@@ -328,11 +339,12 @@ final class AppModel {
             return "That doesn't look like a Steam profile link, custom URL, or SteamID64."
         }
         syncPhase = .resolving
+        await web.refresh(renewIfNeeded: false)
         do {
             let profile = try await client.profile(reference)
             syncPhase = .idle
-            guard profile.isPublic else {
-                return "\(profile.personaName)'s profile is private. Gauge can only read public inventories."
+            if let problem = profile.accessProblem(signedInSteamID: web.signedInSteamID) {
+                return problem
             }
             if settings.profile?.steamID64 != profile.steamID64 {
                 clearLocalData(keepSettings: true)
@@ -343,7 +355,6 @@ final class AppModel {
             }
             started = true
             await syncInventories(force: true)
-            await web.refresh()
             startScheduler()
             return nil
         } catch {

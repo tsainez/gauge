@@ -6,6 +6,10 @@
 - [ ] Load your own profile and confirm that inventory pages, the inventory directory (`g_rgAppContextData` on `/profiles/<id>/inventory/`), and `priceoverview` parse as expected.
 - [ ] Confirm the Dota 2 set format in item descriptions. `ItemSetDetector` expects the set name followed by its pieces, with the pieces sharing a color. If it's wrong, capture one real description into `gaugeTests/SteamParsingTests.swift` and adjust.
 - [ ] Check whether `count=2000` is still the inventory page maximum. The client already falls back to 500 on HTTP 400.
+- [ ] Sign in with Steam from onboarding, with a password and with the QR code. Confirm the sheet closes on its own and loads the signed-in account.
+- [ ] Set your inventory to private and confirm Gauge still loads it while signed in (the inventory page and `/inventory/` JSON, sent with your session).
+- [ ] Session renewal: leave Gauge signed in for more than a day (or delete only the `steamLoginSecure` cookie) and confirm the off-screen load of `steamcommunity.com/my/` brings back a fresh cookie. If Steam doesn't renew on page load, fall back to `login.steampowered.com/jwt/refresh?redir=…`.
+- [ ] If Steam's sign-in page misbehaves in `WKWebView` (for example an "unsupported browser" notice), set `applicationNameForUserAgent` to Safari's in `SteamWebSession.webViewConfiguration()`.
 - [ ] List one cheap item end to end: sign in, list, confirm in the Steam Mobile app, and see it leave the inventory.
 
 ## Screenshot dataset from a large public inventory
@@ -33,3 +37,4 @@ The goal is a realistic, image-rich dataset for App Store screenshots.
 - [ ] Move inventory JSON encoding and decoding fully off the main actor for very large inventories (100k+ items); consider a `ModelActor`.
 - [ ] Add UI tests driven by Demo mode (`gaugeUITests`).
 - [ ] App Store review: explain the sign-in web view and the confirmation step in the review notes.
+- [ ] Sign out on Steam's side too (revoke the refresh token), not only by deleting the cookies on this Mac.

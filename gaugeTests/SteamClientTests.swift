@@ -100,6 +100,18 @@ struct SteamClientTests {
         #expect(request.value(forHTTPHeaderField: "Cookie")?.contains("sessionid=abc") == true)
     }
 
+    @Test func sendsTheOwnersSignInOnlyWhenGiven() async throws {
+        MockSteam.requests = []
+        MockSteam.routes = [("/inventory/7656119", 200, Self.page(["1"], more: nil))]
+        let client = SteamClient(configuration: MockSteam.configuration(), intervalScale: 0)
+        _ = try await client.inventory(steamID64: "76561197960287930", context: Self.context)
+        #expect(MockSteam.requests.last?.value(forHTTPHeaderField: "Cookie") == nil)
+
+        let auth = SteamWebAuth(steamID64: "76561197960287930", sessionID: "abc", steamLoginSecure: "76561197960287930%7C%7Ctoken")
+        _ = try await client.inventory(steamID64: "76561197960287930", context: Self.context, auth: auth)
+        #expect(MockSteam.requests.last?.value(forHTTPHeaderField: "Cookie")?.contains("steamLoginSecure=76561197960287930%7C%7Ctoken") == true)
+    }
+
     @Test func resolvesVanityProfiles() async throws {
         MockSteam.routes = [("/id/gaben/", 200, "<profile><steamID64>76561197960287930</steamID64><steamID><![CDATA[Rabscuttle]]></steamID><privacyState>public</privacyState></profile>")]
         let client = SteamClient(configuration: MockSteam.configuration(), intervalScale: 0)
