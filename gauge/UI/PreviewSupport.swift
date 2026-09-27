@@ -36,6 +36,14 @@ extension AppModel {
         }
         return model
     }
+
+    /// The demo's Counter-Strike 2 inventory, with the blue gem Case Hardened selected.
+    static func previewSkins() -> AppModel {
+        let model = preview(tab: .inventory)
+        model.browser.contextKey = InventoryContext.key(appID: 730, contextID: "2")
+        model.browser.focusedID = model.allItems.first { $0.skin?.pattern == 661 }?.id
+        return model
+    }
 }
 
 #Preview("Portfolio") {
@@ -47,6 +55,12 @@ extension AppModel {
 #Preview("Inventory") {
     RootView()
         .environment(AppModel.preview(tab: .inventory))
+        .frame(width: 1_280, height: 800)
+}
+
+#Preview("Inventory, Counter-Strike 2") {
+    RootView()
+        .environment(AppModel.previewSkins())
         .frame(width: 1_280, height: 800)
 }
 

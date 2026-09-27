@@ -48,6 +48,8 @@ nonisolated enum CleanupFilter: Hashable, Sendable {
             case .cheap: return "Under \(Money.format(rules.cheapBelowCents, currency))"
             case .everythingElse: return "Everything else"
             case .expensive: return "\(Money.format(rules.reviewAboveCents, currency)) or more"
+            case .lowFloat: return "Low floats"
+            case .applied: return "Stickers and charms"
             case .starred: return "Starred"
             case .setPiece: return "Set pieces"
             case .notPriced: return "Not priced yet"
@@ -61,11 +63,12 @@ nonisolated enum CleanupFilter: Hashable, Sendable {
     }
 }
 
-/// Every copy of one item in one bucket.
+/// Every copy of one item in one bucket. A CS2 item with a float or pattern
+/// gets a row to itself, since no two copies are alike.
 nonisolated struct CleanupRow: Identifiable, Hashable, Sendable {
     var entries: [CleanupEntry]
 
-    var id: String { Self.id(bucket: bucket, priceKey: item.priceKey) }
+    var id: String { Self.id(bucket: bucket, key: Self.groupKey(for: item)) }
     var first: CleanupEntry { entries[0] }
     var item: InventoryItem { first.item }
     var bucket: CleanupBucket { first.bucket }
@@ -89,14 +92,13 @@ nonisolated struct CleanupRow: Identifiable, Hashable, Sendable {
         return entries.map(\.reason).filter { seen.insert($0).inserted }.sorted { $0.kind.rank < $1.kind.rank }
     }
 
-    static func id(bucket: CleanupBucket, priceKey: String) -> String { "\(bucket.rawValue)|\(priceKey)" }
+    static func id(bucket: CleanupBucket, key: String) -> String { "\(bucket.rawValue)|\(key)" }
+
+    /// What collapses into one row: copies of an item, or just the one when it's one of a kind.
+    static func groupKey(for item: InventoryItem) -> String { item.isOneOfAKind ? item.id : item.copyKey }
 
     func matches(search needle: String) -> Bool {
-        guard !needle.isEmpty else { return true }
-        let item = item
-        return item.name.lowercased().contains(needle)
-            || item.type.lowercased().contains(needle)
-            || (item.usedBy?.lowercased().contains(needle) ?? false)
+        entries.contains { $0.item.matches(search: needle) }
     }
 
     /// Collapses copies into rows, then applies search, filter, and sort.
@@ -109,7 +111,7 @@ nonisolated struct CleanupRow: Identifiable, Hashable, Sendable {
         var order: [String] = []
         var grouped: [String: [CleanupEntry]] = [:]
         for entry in entries {
-            let key = id(bucket: entry.bucket, priceKey: entry.item.priceKey)
+            let key = id(bucket: entry.bucket, key: groupKey(for: entry.item))
             if grouped[key] == nil { order.append(key) }
             grouped[key, default: []].append(entry)
         }
@@ -135,7 +137,9 @@ nonisolated struct CleanupRow: Identifiable, Hashable, Sendable {
                 if l.id != r.id { return CopyIndex.isOlder(r, l) }
             }
             let order = lhs.item.name.localizedStandardCompare(rhs.item.name)
-            return order != .orderedSame ? order == .orderedAscending : lhs.id < rhs.id
+            if order != .orderedSame { return order == .orderedAscending }
+            if let left = lhs.item.wear, let right = rhs.item.wear, left != right { return left < right }
+            return lhs.id < rhs.id
         }
     }
 
@@ -169,7 +173,20 @@ extension CleanupPlan {
     func itemIDs(inRow rowID: String) -> [String] {
         let parts = rowID.split(separator: "|", maxSplits: 1).map(String.init)
         guard parts.count == 2, let bucket = CleanupBucket(rawValue: parts[0]) else { return [] }
-        return entries(in: bucket).filter { $0.item.priceKey == parts[1] }.map(\.item.id)
+        return entries(in: bucket).filter { CleanupRow.groupKey(for: $0.item) == parts[1] }.map(\.item.id)
+    }
+
+    /// Whether any CS2 item with a float or stickers is in the plan, which brings up the skin rules.
+    var hasSkins: Bool {
+        CleanupBucket.allCases.contains { bucket in entries(in: bucket).contains { $0.item.skin != nil } }
+    }
+
+    /// Every copy of an item across the buckets, the best float first.
+    func copies(of item: InventoryItem) -> [CleanupEntry] {
+        CleanupBucket.allCases
+            .flatMap { entries(in: $0) }
+            .filter { $0.item.copyKey == item.copyKey }
+            .sorted { CopyIndex.isBetter($0.item, $1.item) }
     }
 
     /// Which bucket each item is in.

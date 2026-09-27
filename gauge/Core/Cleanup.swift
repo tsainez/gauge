@@ -7,8 +7,9 @@
 //
 //  Selling rules pick candidates (extra copies, cheap items, or everything
 //  else); protections then keep some of them anyway (starred items, set
-//  pieces, rising prices, items that only pay a cent) or hold expensive ones
-//  for a second look.
+//  pieces, rising prices, items that only pay a cent) or hold some for a
+//  second look: expensive items, and CS2 skins whose float or stickers may
+//  be worth more than the Market price, which is the same for every copy.
 //
 
 import Foundation
@@ -63,6 +64,14 @@ nonisolated struct CleanupRules: Codable, Equatable, Sendable {
     /// Items at or above this buyer price go to "Worth a look" instead of being sold.
     var reviewAboveCents = 500
 
+    // Counter-Strike 2
+    /// Skins with a float in the cleanest `lowFloatShare` of their exterior go to "Worth a look".
+    var reviewLowFloats = true
+    /// 0.05 is the cleanest 5%: under 0.0035 for Factory New, under 0.1615 for Field-Tested.
+    var lowFloatShare = 0.05
+    /// Skins with stickers, patches, or a charm applied go to "Worth a look".
+    var reviewApplied = true
+
     // Advanced
     /// Keep one copy of each piece of a set once this many of its pieces are owned.
     var keepSetPieces = false
@@ -73,6 +82,21 @@ nonisolated struct CleanupRules: Codable, Equatable, Sendable {
     var pricing: ListingPriceStrategy = .lowestListing
     /// Never list below this buyer price. Steam's own floor is $0.03.
     var floorCents = SteamFees.floorBuyerCents
+}
+
+extension CleanupRules {
+    /// What holds an item a rule picks back for a second look, for "Worth a look":
+    /// "worth $5.00 or more, a skin with a low float, or a skin with stickers or a charm".
+    /// The skin checks are left out when there are no CS2 skins to apply them to.
+    func reviewSummary(currency: SteamCurrency, skins: Bool) -> String? {
+        var parts: [String] = []
+        if reviewExpensive { parts.append("worth \(Money.format(reviewAboveCents, currency)) or more") }
+        if skins && reviewLowFloats { parts.append("a skin with a low float") }
+        if skins && reviewApplied { parts.append("a skin with stickers or a charm") }
+        guard let last = parts.popLast() else { return nil }
+        if parts.isEmpty { return last }
+        return parts.joined(separator: ", ") + (parts.count > 1 ? ", or " : " or ") + last
+    }
 }
 
 /// Decodes with defaults so rules saved by an older version keep working.
@@ -90,6 +114,9 @@ extension CleanupRules {
         keepStarred = (try? c.decodeIfPresent(Bool.self, forKey: .keepStarred)) ?? d.keepStarred
         reviewExpensive = (try? c.decodeIfPresent(Bool.self, forKey: .reviewExpensive)) ?? d.reviewExpensive
         reviewAboveCents = (try? c.decodeIfPresent(Int.self, forKey: .reviewAboveCents)) ?? d.reviewAboveCents
+        reviewLowFloats = (try? c.decodeIfPresent(Bool.self, forKey: .reviewLowFloats)) ?? d.reviewLowFloats
+        lowFloatShare = (try? c.decodeIfPresent(Double.self, forKey: .lowFloatShare)) ?? d.lowFloatShare
+        reviewApplied = (try? c.decodeIfPresent(Bool.self, forKey: .reviewApplied)) ?? d.reviewApplied
         keepSetPieces = (try? c.decodeIfPresent(Bool.self, forKey: .keepSetPieces)) ?? d.keepSetPieces
         setThreshold = (try? c.decodeIfPresent(Int.self, forKey: .setThreshold)) ?? d.setThreshold
         holdRising = (try? c.decodeIfPresent(Bool.self, forKey: .holdRising)) ?? d.holdRising
@@ -109,6 +136,8 @@ nonisolated struct CleanupReason: Hashable, Sendable {
         case everythingElse
         // Worth a look
         case expensive
+        case lowFloat
+        case applied
         // Keep
         case starred
         case setPiece
@@ -236,15 +265,24 @@ nonisolated enum CleanupPlanner {
             } else if rules.sellEverythingElse {
                 candidate = (.everythingElse, "Everything else")
             } else if rules.sellDuplicates && copies > 1 {
-                add(.keep, .keptCopy, "Keeping 1 of \(copies)")
+                add(.keep, .keptCopy, item.wear == nil ? "Keeping 1 of \(copies)" : "Lowest float of \(copies)")
                 continue
             } else {
                 add(.keep, .noRule, keepText(rules, currency: currency))
                 continue
             }
 
+            let extra = isExtra ? " · extra copy" : ""
             if rules.reviewExpensive && buyer >= rules.reviewAboveCents {
-                add(.review, .expensive, "Worth \(Money.format(buyer, currency))" + (isExtra ? " · extra copy" : ""))
+                add(.review, .expensive, "Worth \(Money.format(buyer, currency))" + extra)
+                continue
+            }
+            if rules.reviewLowFloats, let wear = item.wear, Exterior.position(of: wear) < rules.lowFloatShare {
+                add(.review, .lowFloat, "Float \(FloatText.short(wear)) · \(lowFloatText(wear))" + extra)
+                continue
+            }
+            if rules.reviewApplied, let applied = item.skin?.appliedSummary {
+                add(.review, .applied, "With \(applied)" + extra)
                 continue
             }
             if seller <= 1 && !rules.sellFloorItems {
@@ -264,6 +302,11 @@ nonisolated enum CleanupPlanner {
             }
         }
         return CleanupPlan(entries: buckets, unpricedCount: unpriced)
+    }
+
+    /// "cleanest 2% of Factory New"
+    static func lowFloatText(_ wear: Double) -> String {
+        "cleanest \(Exterior.cleanestPercent(of: wear))% of \(Exterior.of(wear).title)"
     }
 
     /// Why a priced item no selling rule picked is kept.
@@ -286,9 +329,10 @@ nonisolated enum CleanupPlanner {
     }
 }
 
-/// Which assets are extra copies of an item. Copies share a market hash name,
-/// and a stack counts as one copy. The copy kept is a starred one or one that
-/// can't be sold anyway; failing that, the oldest.
+/// Which assets are extra copies of an item. Copies share a market hash name
+/// (and, for a Doppler, a phase), and a stack counts as one copy. The copy kept
+/// is a starred one; failing that, for CS2 skins, the lowest float, even if it
+/// can't be sold; for anything else, one that can't be sold anyway, or the oldest.
 nonisolated struct CopyIndex: Sendable {
     private var counts: [String: Int] = [:]
     private var extras: Set<String> = []
@@ -296,28 +340,45 @@ nonisolated struct CopyIndex: Sendable {
     init(items: [InventoryItem], protected: Set<String> = []) {
         var groups: [String: [InventoryItem]] = [:]
         for item in items {
-            groups[item.priceKey, default: []].append(item)
+            groups[item.copyKey, default: []].append(item)
         }
         for (key, group) in groups {
             counts[key] = group.count
             guard group.count > 1 else { continue }
-            let keepsOne = group.contains { !$0.marketable || protected.contains($0.id) }
             var sellable = group.filter { $0.marketable && !protected.contains($0.id) }
-            if !keepsOne, let oldest = sellable.min(by: Self.isOlder) {
-                sellable.removeAll { $0.id == oldest.id }
+            if let kept = Self.keeper(of: group, protected: protected) {
+                sellable.removeAll { $0.id == kept.id }
             }
             extras.formUnion(sellable.map(\.id))
         }
     }
 
+    /// The copy to keep, or nil when a starred or unsellable copy already stays.
+    private static func keeper(of group: [InventoryItem], protected: Set<String>) -> InventoryItem? {
+        if group.contains(where: { protected.contains($0.id) }) { return nil }
+        if group.contains(where: { $0.wear != nil }) { return group.min(by: isBetter) }
+        if group.contains(where: { !$0.marketable }) { return nil }
+        return group.min(by: isOlder)
+    }
+
     /// Copies of this item, counting ones that can't be sold.
-    func copies(of item: InventoryItem) -> Int { counts[item.priceKey] ?? 1 }
+    func copies(of item: InventoryItem) -> Int { counts[item.copyKey] ?? 1 }
 
     func isExtra(_ item: InventoryItem) -> Bool { extras.contains(item.id) }
 
     /// Asset ids grow over time, so a shorter or smaller id is older.
     static func isOlder(_ lhs: InventoryItem, _ rhs: InventoryItem) -> Bool {
         lhs.assetID.count != rhs.assetID.count ? lhs.assetID.count < rhs.assetID.count : lhs.assetID < rhs.assetID
+    }
+
+    /// The lower float first, then the older copy. Copies without a float come last.
+    static func isBetter(_ lhs: InventoryItem, _ rhs: InventoryItem) -> Bool {
+        switch (lhs.wear, rhs.wear) {
+        case let (left?, right?) where left != right: left < right
+        case (.some, nil): true
+        case (nil, .some): false
+        default: isOlder(lhs, rhs)
+        }
     }
 }
 

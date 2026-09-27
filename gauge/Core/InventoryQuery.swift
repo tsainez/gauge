@@ -25,6 +25,8 @@ nonisolated enum InventorySort: String, Codable, CaseIterable, Identifiable, Sen
     case name
     case rarity
     case newest
+    /// Counter-Strike 2: the lowest float first.
+    case float
 
     var id: String { rawValue }
 
@@ -34,6 +36,7 @@ nonisolated enum InventorySort: String, Codable, CaseIterable, Identifiable, Sen
         case .name: "Name"
         case .rarity: "Rarity"
         case .newest: "Newest"
+        case .float: "Float"
         }
     }
 }
@@ -94,13 +97,7 @@ nonisolated struct InventoryQuery: Equatable, Sendable {
         for (category, values) in tags where !values.isEmpty {
             guard let tag = item.tag(category), values.contains(tag.name) else { return false }
         }
-        if !needle.isEmpty {
-            let haystack = item.name.lowercased()
-            if !haystack.contains(needle) && !(item.usedBy?.lowercased().contains(needle) ?? false) && !item.type.lowercased().contains(needle) {
-                return false
-            }
-        }
-        return true
+        return item.matches(search: needle)
     }
 
     func sorted(_ items: [InventoryItem], facts: InventoryFacts) -> [InventoryItem] {
@@ -122,6 +119,16 @@ nonisolated struct InventoryQuery: Equatable, Sendable {
             // Asset ids grow over time, so the longest/largest id is the most recent.
             return items.sorted { lhs, rhs in
                 lhs.assetID.count != rhs.assetID.count ? lhs.assetID.count > rhs.assetID.count : lhs.assetID > rhs.assetID
+            }
+        case .float:
+            // Items without a float follow, by name.
+            return items.sorted { lhs, rhs in
+                switch (lhs.wear, rhs.wear) {
+                case let (left?, right?) where left != right: left < right
+                case (.some, nil): true
+                case (nil, .some): false
+                default: lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+                }
             }
         }
     }

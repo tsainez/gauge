@@ -38,12 +38,19 @@ extension AppModel {
         return Date().timeIntervalSince(lastInventoryCheck) >= interval
     }
 
+    /// Bumped when Gauge reads more out of an inventory than before, so inventories
+    /// cached by an older version are downloaded once more. 2: CS2 floats and patterns.
+    static let inventoryFormat = 2
+    static let inventoryFormatKey = "GaugeInventoryFormat"
+
     /// Refreshes inventories from Steam. With `force`, every inventory is re-downloaded.
     func syncInventories(force: Bool) async {
         guard let profile = settings.profile, !settings.demoMode, !syncPhase.isBusy else { return }
         notice = nil
         syncPhase = .discovering
         let auth = await ownerAuth(for: profile)
+        let outdated = defaults.integer(forKey: Self.inventoryFormatKey) < Self.inventoryFormat
+        var upgraded = true
 
         var directory: [InventoryContext]
         var directoryIsComplete = true
@@ -64,7 +71,9 @@ extension AppModel {
             if settings.demoMode { return }
             let cached = itemsByContext[context.id]
             let unchanged = cached != nil && self.context(for: context.id)?.assetCount == context.assetCount
-            if !force && directoryIsComplete && unchanged {
+            // Only CS2 inventories gained anything from the last format change.
+            let upgrading = outdated && cached != nil && context.appID == SkinDetailsReader.appID
+            if !force && directoryIsComplete && unchanged && !upgrading {
                 refreshed.append(context)
                 continue
             }
@@ -88,10 +97,12 @@ extension AppModel {
                 refreshed.append(contentsOf: directory.filter { candidate in
                     !refreshed.contains { $0.id == candidate.id } && itemsByContext[candidate.id] != nil
                 })
+                upgraded = false
                 break
             } catch {
                 contextStatus[context.id, default: ContextStatus()].error = error.localizedDescription
                 if cached != nil { refreshed.append(context) }
+                if upgrading { upgraded = false }
                 // While probing guessed games, a 403 just means there's nothing there.
                 if directoryIsComplete, let failure = error as? SteamClient.Failure, failure == .privateInventory {
                     notice = auth == nil
@@ -113,6 +124,9 @@ extension AppModel {
 
         lastInventoryCheck = Date()
         defaults.set(lastInventoryCheck, forKey: Self.lastCheckKey)
+        if outdated && upgraded {
+            defaults.set(Self.inventoryFormat, forKey: Self.inventoryFormatKey)
+        }
         syncPhase = .idle
         rebuildDerived()
         pruneCleanupOverrides()

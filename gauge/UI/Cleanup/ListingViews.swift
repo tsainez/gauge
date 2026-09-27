@@ -266,6 +266,13 @@ struct ListingRow: View {
                             .font(p.font(11, .bold))
                             .foregroundStyle(p.accent)
                     }
+                    if let summary = item.skin?.summary {
+                        Text(summary)
+                            .font(p.font(11))
+                            .foregroundStyle(p.secondaryText)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
                 }
                 if let status, let detail = detail(status) {
                     Text(detail)

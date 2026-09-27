@@ -11,6 +11,8 @@
 - [ ] Session renewal: leave Gauge signed in for more than a day (or delete only the `steamLoginSecure` cookie) and confirm the off-screen load of `steamcommunity.com/my/` brings back a fresh cookie. If Steam doesn't renew on page load, fall back to `login.steampowered.com/jwt/refresh?redir=…`.
 - [ ] If Steam's sign-in page misbehaves in `WKWebView` (for example an "unsupported browser" notice), set `applicationNameForUserAgent` to Safari's in `SteamWebSession.webViewConfiguration()`.
 - [ ] List one cheap item end to end: sign in, list, confirm in the Steam Mobile app, and see it leave the inventory.
+- [ ] Load a CS2 inventory and check `asset_properties`: the property ids and names (Gauge reads 1 as the pattern, 2 the float, 3 a charm's template, 6 the certificate), that values arrive as strings, that certificates decode, and that the `Sticker:` and `Charm:` description lines match the certificate's pieces. Capture one real response into `gaugeTests/SkinDetailsTests.swift`.
+- [ ] CS2 trade protection: items received in a trade can't be traded or sold for 7 days, and Steam may list them outside the usual 730/2 inventory (CSFloat's extension looks for a context 16). Check how they appear and whether Gauge shows them.
 
 ## Check on a Mac (Clean up, Portfolio, network log)
 
@@ -19,6 +21,7 @@
 - [ ] Rows dragged out of Gauge paste as text elsewhere. Consider an exported UTType for the payload.
 - [ ] List selection, row separators, and swipe colors under Modern and both classic themes, including with macOS in light mode.
 - [ ] Portfolio chart: axis labels fit at the window's minimum size, the hover readout stays inside the chart, and a one-day history shows its single point at the right edge.
+- [ ] CS2 skins in Demo mode: the float badge fits narrow tiles, the wear bar's marker lines up with the float, and the Inventory detail panel scrolls (buttons stay put) under each theme.
 - [ ] Network activity: Show log file opens `~/Library/Containers/tsainez.gauge/Data/Library/Logs/Gauge`, Export log saves earlier launches too, and Console.app shows the `network` category.
 - [ ] Log artwork requests too (a custom image loader or `URLProtocol`), or keep saying they aren't listed.
 
@@ -37,6 +40,10 @@ The goal is a realistic, image-rich dataset for App Store screenshots.
 - [ ] Bulk pricing for huge inventories: page `/market/search/render?norender=1` (100 items a request) for games where the user owns a large share of the catalog.
 - [ ] Gem breakdown: "Turn into Gems" for Steam community items as a Clean up bucket. The storyboard mentions gems.
 - [ ] Show active listings and cancel them from Gauge (`/market/mylistings`, signed in).
+- [ ] CS2 float ranges per finish (from the item schema), so a low float is measured against what that finish can reach rather than its whole exterior.
+- [ ] Notable CS2 patterns as a keep rule: Case Hardened blue gems, Fade percentages, Marble Fade patterns, Crimson Web webs. Each needs a per-finish table.
+- [ ] Your own CS2 item history: Steam's inventory history (signed in) says how each item arrived, such as unboxed, traded with someone, or bought on the Market. Ownership before you isn't available from Steam.
+- [ ] Prices that account for a float or stickers. The Market's lowest listing is the same for every copy.
 - [ ] Notifications when net worth moves more than X% in a day.
 - [ ] Localize the UI, and parse prices in every Steam currency with live samples.
 - [ ] App icon and About artwork. The asset catalog is still empty.

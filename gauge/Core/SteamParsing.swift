@@ -32,12 +32,16 @@ nonisolated enum InventoryPageParser {
         for description in response.descriptions {
             descriptions[description.lookupKey] = description
         }
+        var properties: [String: [AssetPropertyDTO]] = [:]
+        for entry in response.assetProperties where !entry.assetID.isEmpty {
+            properties[entry.assetID] = entry.properties
+        }
 
         var items: [InventoryItem] = []
         items.reserveCapacity(response.assets.count)
         for asset in response.assets {
             guard let description = descriptions[asset.lookupKey] else { continue }
-            items.append(makeItem(asset: asset, description: description))
+            items.append(makeItem(asset: asset, description: description, properties: properties[asset.assetID] ?? []))
         }
         return InventoryPage(
             items: items,
@@ -47,7 +51,7 @@ nonisolated enum InventoryPageParser {
         )
     }
 
-    static func makeItem(asset: AssetDTO, description: DescriptionDTO) -> InventoryItem {
+    static func makeItem(asset: AssetDTO, description: DescriptionDTO, properties: [AssetPropertyDTO] = []) -> InventoryItem {
         let tags = description.tags.map {
             ItemTag(category: $0.category, categoryName: $0.categoryName, internalName: $0.internalName, name: $0.name, color: $0.color)
         }
@@ -74,7 +78,8 @@ nonisolated enum InventoryPageParser {
             commodity: description.commodity,
             tags: tags,
             details: lines.map(\.text).filter { !$0.isEmpty },
-            itemSet: ItemSetDetector.detect(itemName: baseName, lines: lines)
+            itemSet: ItemSetDetector.detect(itemName: baseName, lines: lines),
+            skin: asset.appID == SkinDetailsReader.appID ? SkinDetailsReader.read(properties, lines: lines) : nil
         )
     }
 
@@ -133,6 +138,125 @@ nonisolated enum ItemSetDetector {
         }
         guard let header, members.count >= 2 else { return nil }
         return ItemSetInfo(name: header, members: members)
+    }
+}
+
+// MARK: - Counter-Strike 2 skins
+
+/// Reads a CS2 item's float, pattern, and certificate from the inventory's
+/// per-asset `asset_properties`, and its sticker and charm names from its description:
+///
+///     "asset_properties": [{"appid": 730, "contextid": "2", "assetid": "4130…",
+///       "asset_properties": [{"propertyid": 1, "int_value": "661", "name": "Pattern Template"},
+///                            {"propertyid": 2, "float_value": "0.0712…", "name": "Wear Rating"},
+///                            {"propertyid": 6, "string_value": "C3D3…", "name": "Item Certificate"}]}]
+///
+nonisolated enum SkinDetailsReader {
+    static let appID = 730
+
+    enum Property {
+        case pattern
+        case wear
+        case charmPattern
+        case certificate
+
+        /// Steam names its properties as well as numbering them. A known name wins,
+        /// in case the numbers ever move; anything else goes by number.
+        init?(_ property: AssetPropertyDTO) {
+            switch property.name?.lowercased() {
+            case "pattern template": self = .pattern
+            case "wear rating": self = .wear
+            case "charm template": self = .charmPattern
+            case "item certificate": self = .certificate
+            default:
+                switch property.id {
+                case 1: self = .pattern
+                case 2: self = .wear
+                case 3: self = .charmPattern
+                case 6: self = .certificate
+                default: return nil
+                }
+            }
+        }
+    }
+
+    /// Stickers, graffiti, patches, and charms on their own: their certificate lists the item itself.
+    static let accessoryDefIndexes: Set<Int> = [1209, 1348, 1349, 1355, 4609]
+
+    static func read(_ properties: [AssetPropertyDTO], lines: [DescriptionLine]) -> SkinDetails? {
+        var details = SkinDetails()
+        var charmPattern: Int?
+        var block: ItemCertificate.Block?
+        for property in properties {
+            switch Property(property) {
+            case .pattern: details.pattern = property.intValue
+            case .wear: details.wear = property.floatValue
+            case .charmPattern: charmPattern = property.intValue
+            case .certificate:
+                details.certificate = property.stringValue
+                block = property.stringValue.flatMap(ItemCertificate.decode)
+            case nil: continue
+            }
+        }
+
+        if let block {
+            details.paintIndex = block.paintIndex.flatMap { $0 > 0 ? $0 : nil }
+            details.defIndex = block.defIndex
+            details.statTrak = block.killEaterValue ?? (block.killEaterScoreType != nil ? 0 : nil)
+            details.nameTag = block.customName.flatMap { $0.isEmpty ? nil : $0 }
+            details.origin = block.origin
+            if accessoryDefIndexes.contains(block.defIndex ?? -1) {
+                // A sticker, graffiti, patch, or charm on its own: its lists describe the item
+                // itself, and a charm's template is its pattern.
+                details.pattern = charmPattern ?? block.keychains.first?.pattern ?? details.pattern
+                charmPattern = nil
+            } else {
+                details.wear = details.wear ?? block.paintWear.map(Double.init)
+                details.pattern = details.pattern ?? block.paintSeed
+                details.stickers = block.stickers.sorted { ($0.slot ?? 0) < ($1.slot ?? 0) }.map {
+                    SkinAccessory(slot: $0.slot ?? 0, kitID: $0.kitID, wear: $0.wear.map(Double.init))
+                }
+                details.charms = block.keychains.sorted { ($0.slot ?? 0) < ($1.slot ?? 0) }.map {
+                    SkinAccessory(slot: $0.slot ?? 0, kitID: $0.kitID, pattern: $0.pattern)
+                }
+            }
+        }
+
+        // Without a certificate, a charm template means a charm on its own, or one hung on a skin.
+        if let charmPattern {
+            if details.wear == nil && details.pattern == nil && details.charms.isEmpty {
+                // A charm on its own: its template is its pattern.
+                details.pattern = charmPattern
+            } else if details.charms.isEmpty {
+                details.charms = [SkinAccessory(slot: 0, pattern: charmPattern)]
+            } else if details.charms[0].pattern == nil {
+                details.charms[0].pattern = charmPattern
+            }
+        }
+
+        attach(names(in: lines, prefixes: ["Sticker: ", "Stickers: ", "Patch: ", "Patches: "]), to: &details.stickers)
+        attach(names(in: lines, prefixes: ["Charm: ", "Charms: "]), to: &details.charms)
+        return details.isEmpty ? nil : details
+    }
+
+    /// "Sticker: Crown (Foil), Titan (Holo) | Katowice 2014" → each name, in slot order.
+    static func names(in lines: [DescriptionLine], prefixes: [String]) -> [String]? {
+        for line in lines {
+            guard let prefix = prefixes.first(where: { line.text.hasPrefix($0) }) else { continue }
+            return line.text.dropFirst(prefix.count)
+                .components(separatedBy: ", ")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        }
+        return nil
+    }
+
+    /// Names go on only when there's one for every piece, so none lands on the wrong sticker.
+    static func attach(_ names: [String]?, to accessories: inout [SkinAccessory]) {
+        guard let names, names.count == accessories.count else { return }
+        for index in accessories.indices {
+            accessories[index].name = names[index]
+        }
     }
 }
 
@@ -255,6 +379,8 @@ nonisolated enum SellResponseParser {
 nonisolated struct InventoryResponseDTO: Decodable {
     var assets: [AssetDTO]
     var descriptions: [DescriptionDTO]
+    /// Per-asset values, such as a CS2 item's float. Games without them leave it out.
+    var assetProperties: [AssetPropertiesDTO]
     var moreItems: Bool
     var lastAssetID: String?
     var totalInventoryCount: Int?
@@ -263,6 +389,7 @@ nonisolated struct InventoryResponseDTO: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case assets, descriptions, success, error, Error
+        case assetProperties = "asset_properties"
         case moreItems = "more_items"
         case lastAssetID = "last_assetid"
         case totalInventoryCount = "total_inventory_count"
@@ -272,6 +399,8 @@ nonisolated struct InventoryResponseDTO: Decodable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         assets = try c.decodeIfPresent([AssetDTO].self, forKey: .assets) ?? []
         descriptions = try c.decodeIfPresent([DescriptionDTO].self, forKey: .descriptions) ?? []
+        // Extra detail only: an inventory still loads if these ever change shape.
+        assetProperties = (try? c.decodeIfPresent([AssetPropertiesDTO].self, forKey: .assetProperties)) ?? []
         moreItems = (c.flexibleInt(.moreItems) ?? 0) != 0
         lastAssetID = c.flexibleString(.lastAssetID)
         totalInventoryCount = c.flexibleInt(.totalInventoryCount)
@@ -305,6 +434,55 @@ nonisolated struct AssetDTO: Decodable {
         self.classID = classID
         instanceID = c.flexibleString(.instanceid) ?? "0"
         amount = c.flexibleInt(.amount) ?? 1
+    }
+}
+
+nonisolated struct AssetPropertiesDTO: Decodable {
+    var assetID: String
+    var properties: [AssetPropertyDTO]
+
+    enum CodingKeys: String, CodingKey {
+        case assetid
+        case properties = "asset_properties"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        assetID = c.flexibleString(.assetid) ?? ""
+        properties = (try? c.decodeIfPresent([AssetPropertyDTO].self, forKey: .properties)) ?? []
+    }
+}
+
+/// One property. Steam sends the value as a string in whichever field fits its type.
+nonisolated struct AssetPropertyDTO: Decodable {
+    var id: Int
+    var name: String?
+    var intValue: Int?
+    var floatValue: Double?
+    var stringValue: String?
+
+    enum CodingKeys: String, CodingKey {
+        case propertyid, name
+        case intValue = "int_value"
+        case floatValue = "float_value"
+        case stringValue = "string_value"
+    }
+
+    init(id: Int, name: String? = nil, intValue: Int? = nil, floatValue: Double? = nil, stringValue: String? = nil) {
+        self.id = id
+        self.name = name
+        self.intValue = intValue
+        self.floatValue = floatValue
+        self.stringValue = stringValue
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.flexibleInt(.propertyid) ?? 0
+        name = c.flexibleString(.name)
+        intValue = c.flexibleInt(.intValue)
+        floatValue = c.flexibleDouble(.floatValue)
+        stringValue = c.flexibleString(.stringValue)
     }
 }
 
@@ -492,5 +670,11 @@ nonisolated extension KeyedDecodingContainer {
     func flexibleBool(_ key: Key) -> Bool? {
         if let value = try? decodeIfPresent(Bool.self, forKey: key) { return value }
         return flexibleInt(key).map { $0 != 0 }
+    }
+
+    func flexibleDouble(_ key: Key) -> Double? {
+        if let value = try? decodeIfPresent(Double.self, forKey: key) { return value }
+        if let value = try? decodeIfPresent(String.self, forKey: key) { return Double(value) }
+        return nil
     }
 }

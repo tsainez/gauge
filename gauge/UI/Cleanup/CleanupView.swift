@@ -73,6 +73,7 @@ struct CleanupSidebar: View {
         let rules = model.binding(\.cleanupRules)
         let current = model.settings.cleanupRules
         let currency = model.currency
+        let hasSkins = plan.hasSkins
         VStack(alignment: .leading, spacing: 0) {
             PopoverPicker(
                 title: "Clean up \(model.context(for: session.contextKey)?.name ?? "every inventory")",
@@ -90,7 +91,7 @@ struct CleanupSidebar: View {
                 VStack(alignment: .leading, spacing: 8) {
                     SectionLabel("Sell", p)
                     rule("Extra copies", isOn: rules.sellDuplicates, p) {
-                        Text("Keeps one of each item and sells the rest")
+                        Text(hasSkins ? "Keeps one of each item, the lowest float for skins, and sells the rest" : "Keeps one of each item and sells the rest")
                     }
                     rule("Cheap items", isOn: rules.sellCheap, p) {
                         HStack(spacing: 6) {
@@ -122,6 +123,10 @@ struct CleanupSidebar: View {
                             ) { rules.wrappedValue.reviewAboveCents = $0 }
                             Text("or more")
                         }
+                    }
+
+                    if hasSkins {
+                        skinRules(rules, current, p)
                     }
 
                     DisclosureRow(title: "Advanced", isOpen: showingAdvanced, trailing: advancedSummary, palette: p) {
@@ -182,6 +187,41 @@ struct CleanupSidebar: View {
                 .padding(.leading, 21)
                 .opacity(isOn.wrappedValue ? 1 : 0.55)
         }
+    }
+
+    /// Counter-Strike 2: every copy of a skin sells at the same Market price, but its float
+    /// and stickers can make it worth more, so those wait for a look.
+    @ViewBuilder
+    private func skinRules(_ rules: Binding<CleanupRules>, _ current: CleanupRules, _ p: Palette) -> some View {
+        SectionLabel("Counter-Strike 2", p)
+            .padding(.top, 10)
+        rule("Ask first about low floats", isOn: rules.reviewLowFloats, p) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text("The cleanest")
+                    PopoverPicker(
+                        title: Self.percent(current.lowFloatShare),
+                        options: [0.01, 0.02, 0.05, 0.1, 0.25].map { PickerOption(value: $0, label: Self.percent($0)) },
+                        selection: current.lowFloatShare,
+                        palette: p
+                    ) { rules.wrappedValue.lowFloatShare = $0 }
+                    Text("of each wear,")
+                }
+                Text("such as under \(Self.factoryNewThreshold(current.lowFloatShare)) in Factory New")
+            }
+        }
+        rule("Ask first about stickers and charms", isOn: rules.reviewApplied, p) {
+            Text("Skins with stickers, patches, or a charm applied. The Market price leaves them out.")
+        }
+    }
+
+    private static func percent(_ share: Double) -> String {
+        "\(Int((share * 100).rounded()))%"
+    }
+
+    /// 0.0035 for the cleanest 5%.
+    private static func factoryNewThreshold(_ share: Double) -> String {
+        FloatText.full((Exterior.factoryNew.bounds.upper * share * 1_000_000).rounded() / 1_000_000)
     }
 
     @ViewBuilder
@@ -432,9 +472,13 @@ struct BucketTab: View {
 
     private var help: String {
         switch bucket {
-        case .sell: "Listed when you continue. Drop rows here to sell them."
-        case .review: "Picked by a selling rule, but worth \(Money.format(model.settings.cleanupRules.reviewAboveCents, model.currency)) or more. Drop rows here to decide later."
-        case .keep: "Never listed. Drop rows here to keep them."
+        case .sell: return "Listed when you continue. Drop rows here to sell them."
+        case .review:
+            guard let reasons = model.settings.cleanupRules.reviewSummary(currency: model.currency, skins: plan.hasSkins) else {
+                return "Waits until you decide. Drop rows here to decide later."
+            }
+            return "Picked by a selling rule, but \(reasons). Drop rows here to decide later."
+        case .keep: return "Never listed. Drop rows here to keep them."
         }
     }
 }
@@ -560,7 +604,11 @@ struct CleanupList: View {
         if model.allItems.isEmpty { return "Your inventory appears here after the first sync." }
         switch model.cleanup.bucket {
         case .sell: return "Nothing to sell with these rules. Turn on another rule at the left, or swipe items right in Keep."
-        case .review: return "Nothing to look at. Items a rule picks that are worth \(Money.format(model.settings.cleanupRules.reviewAboveCents, model.currency)) or more wait here."
+        case .review:
+            guard let reasons = model.settings.cleanupRules.reviewSummary(currency: model.currency, skins: plan.hasSkins) else {
+                return "Nothing to look at. Rows you drop here wait until you decide."
+            }
+            return "Nothing to look at. Items a rule picks wait here when they're \(reasons)."
         case .keep: return "Nothing kept. Starred items, and anything no rule picks, show up here."
         }
     }
@@ -639,9 +687,9 @@ struct CleanupRowView: View {
         .help(row.reasons.map(\.text).joined(separator: "\n"))
     }
 
-    /// "Mythical Tail · Slark · Dota 2"
+    /// "Mythical Tail · Slark · Dota 2", or "0.0712 · #661 · Classified Rifle" for a skin.
     private var details: String {
-        var parts = [row.item.subtitle]
+        var parts = [row.item.skin?.summary ?? "", row.item.subtitle]
         if let hero = row.item.usedBy, !row.item.subtitle.contains(hero) { parts.append(hero) }
         if let game { parts.append(game) }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
@@ -749,6 +797,9 @@ struct CleanupInspector: View {
                     }
                 }
                 copies(row, p)
+                if item.isOneOfAKind && row.copies > 1 {
+                    skinCopies(row, p)
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     ForEach(row.reasons, id: \.self) { reason in
                         Label(reason.text, systemImage: reason.kind == .movedByYou ? "hand.raised" : "line.3.horizontal.decrease")
@@ -756,6 +807,9 @@ struct CleanupInspector: View {
                     }
                 }
                 .font(p.font(11.5))
+                if let skin = item.skin {
+                    SkinDetailsBox(skin: skin, palette: p)
+                }
                 prices(item, quote: quote, row: row, p)
                 HStack(spacing: 6) {
                     ForEach(CleanupBucket.allCases.filter { $0 != row.bucket }) { bucket in
@@ -796,9 +850,9 @@ struct CleanupInspector: View {
 
     /// "You have 3: 2 to sell, 1 kept."
     private func copies(_ row: CleanupRow, _ p: Palette) -> some View {
-        let key = row.item.priceKey
+        let key = row.item.copyKey
         let counts = CleanupBucket.allCases.map { bucket in
-            (bucket, plan.entries(in: bucket).filter { $0.item.priceKey == key }.count)
+            (bucket, plan.entries(in: bucket).filter { $0.item.copyKey == key }.count)
         }
         let placed = counts.reduce(0) { $0 + $1.1 }
         let locked = max(0, row.copies - placed)
@@ -812,6 +866,30 @@ struct CleanupInspector: View {
         if locked > 0 { parts.append("\(locked) can't be sold") }
         return Text(row.copies > 1 ? "You have \(row.copies): \(parts.joined(separator: ", "))" : "Your only copy")
             .font(p.font(12, .bold))
+    }
+
+    /// Each copy's float and where it's going, the best first, with this row's copy in bold.
+    private func skinCopies(_ row: CleanupRow, _ p: Palette) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(plan.copies(of: row.item)) { entry in
+                let isThis = row.itemIDs.contains(entry.item.id)
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(entry.bucket.color(p))
+                        .frame(width: 7, height: 7)
+                    Text(entry.item.skin?.summary ?? "No float")
+                        .font(isThis ? p.font(11.5, .bold) : p.font(11.5))
+                        .foregroundStyle(isThis ? p.text : p.secondaryText)
+                    Spacer()
+                    Text(entry.bucket.title)
+                        .foregroundStyle(entry.bucket.color(p))
+                }
+            }
+        }
+        .font(p.font(11.5))
+        .monospacedDigit()
+        .padding(8)
+        .classicInset(p)
     }
 
     private func prices(_ item: InventoryItem, quote: PriceQuote?, row: CleanupRow, _ p: Palette) -> some View {
