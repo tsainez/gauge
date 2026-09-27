@@ -158,7 +158,7 @@ actor SteamClient {
     ) async throws -> [InventoryItem] {
         var items: [InventoryItem] = []
         var startAsset: String?
-        var pageSize = 2_000
+        var pageSize = 5_000
         while true {
             var components = URLComponents(string: "https://steamcommunity.com/inventory/\(steamID64)/\(context.appID)/\(context.contextID)")!
             var query = [URLQueryItem(name: "l", value: "english"), URLQueryItem(name: "count", value: String(pageSize))]

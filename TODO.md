@@ -5,7 +5,7 @@
 - [ ] First build in Xcode 27: fix any framework API mismatches the stubbed type-check couldn't catch (see README, "What was verified").
 - [ ] Load your own profile and confirm that inventory pages, the inventory directory (`g_rgAppContextData` on `/profiles/<id>/inventory/`), and `priceoverview` parse as expected.
 - [ ] Confirm the Dota 2 set format in item descriptions. `ItemSetDetector` expects the set name followed by its pieces, with the pieces sharing a color. If it's wrong, capture one real description into `gaugeTests/SteamParsingTests.swift` and adjust.
-- [ ] Check whether `count=2000` is still the inventory page maximum. The client already falls back to 500 on HTTP 400.
+- [x] Check whether `count=2000` is still the inventory page maximum. The client already falls back to 500 on HTTP 400.
 - [ ] Sign in with Steam from onboarding, with a password and with the QR code. Confirm the sheet closes on its own and loads the signed-in account.
 - [ ] Set your inventory to private and confirm Gauge still loads it while signed in (the inventory page and `/inventory/` JSON, sent with your session).
 - [ ] Session renewal: leave Gauge signed in for more than a day (or delete only the `steamLoginSecure` cookie) and confirm the off-screen load of `steamcommunity.com/my/` brings back a fresh cookie. If Steam doesn't renew on page load, fall back to `login.steampowered.com/jwt/refresh?redir=…`.

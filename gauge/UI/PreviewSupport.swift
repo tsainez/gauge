@@ -27,7 +27,7 @@ extension AppModel {
             let base = "https://steamcommunity.com"
             for event in [
                 NetworkEvent(kind: .profile, startedAt: now.addingTimeInterval(-600), url: base + "/profiles/76561190000000000/inventory/", signedIn: true, duration: 0.62, status: 200, bytes: 48_000),
-                NetworkEvent(kind: .inventory, startedAt: now.addingTimeInterval(-590), url: base + "/inventory/76561190000000000/570/2?l=english&count=2000", signedIn: true, waited: 1.4, duration: 1.9, status: 200, bytes: 2_400_000),
+                NetworkEvent(kind: .inventory, startedAt: now.addingTimeInterval(-590), url: base + "/inventory/76561190000000000/570/2?l=english&count=5000", signedIn: true, waited: 1.4, duration: 1.9, status: 200, bytes: 2_400_000),
                 NetworkEvent(kind: .market, startedAt: now.addingTimeInterval(-120), url: base + "/market/priceoverview/?appid=570&currency=1&market_hash_name=Crest", waited: 3.1, duration: 0.41, status: 200, bytes: 88),
                 NetworkEvent(kind: .market, startedAt: now.addingTimeInterval(-30), url: base + "/market/priceoverview/?appid=570&currency=1&market_hash_name=Dust", waited: 3.2, duration: 0.2, status: 429, outcome: .rateLimited(retryAfter: 60)),
             ] {
