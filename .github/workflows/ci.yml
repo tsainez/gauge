@@ -115,3 +115,46 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             COMPILER_INDEX_STORE_ENABLE=NO \
             2>&1 | xcbeautify --renderer github-actions
+
+      # App Store Connect turns away a Mac build whose .icns lacks 512x512 and
+      # 512x512@2x images (ITMS-90236) or whose Info.plist has no category
+      # (ITMS-90242), and holds every build at Missing Compliance until the
+      # encryption question is answered. Check the archived app for all three.
+      - name: Check App Store requirements
+        run: |
+          apps=("$RUNNER_TEMP"/gauge.xcarchive/Products/Applications/*.app)
+          app="${apps[0]}"
+          if [ ! -d "$app" ]; then
+            echo "::error::The archive has no app to check."
+            exit 1
+          fi
+          info() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist" 2>/dev/null || true; }
+          failed=0
+
+          if [ "$(info ITSAppUsesNonExemptEncryption)" != "false" ]; then
+            echo "::error::Info.plist should set ITSAppUsesNonExemptEncryption to NO (INFOPLIST_KEY_ITSAppUsesNonExemptEncryption)."
+            failed=1
+          fi
+          if [ -z "$(info LSApplicationCategoryType)" ]; then
+            echo "::error::Info.plist has no LSApplicationCategoryType (INFOPLIST_KEY_LSApplicationCategoryType)."
+            failed=1
+          fi
+
+          icon=$(info CFBundleIconFile)
+          if [ -z "$icon" ] || [ ! -f "$app/Contents/Resources/${icon%.icns}.icns" ]; then
+            echo "::error::The app has no icon. Fill gauge/Assets.xcassets/AppIcon.appiconset."
+            failed=1
+          else
+            iconutil --convert iconset --output "$RUNNER_TEMP/AppIcon.iconset" "$app/Contents/Resources/${icon%.icns}.icns"
+            for image in icon_512x512.png icon_512x512@2x.png; do
+              if [ ! -f "$RUNNER_TEMP/AppIcon.iconset/$image" ]; then
+                echo "::error::The app icon has no $image."
+                failed=1
+              fi
+            done
+          fi
+
+          if [ "$failed" -eq 0 ]; then
+            echo "App icon, category, and export compliance are all in $(basename "$app")."
+          fi
+          exit "$failed"
