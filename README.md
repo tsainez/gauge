@@ -29,7 +29,7 @@ The app sandbox needs **Outgoing Connections (Client)**. It's turned on through 
 Every pull request and every push to `main` runs `.github/workflows/ci.yml` on GitHub's `xcode-27` runner (macOS 27, Xcode 27.0). `macos-latest` can't build Gauge: it's macOS 26 with Xcode 26, and Gauge needs the macOS 27 SDK to build and a Mac running macOS 27 for its tests, which run inside the app. The `xcode-27` image is in public preview, so a run may wait in the queue.
 
 - **Build and test** builds the shared `gauge` scheme and runs the unit tests. Compile errors and failing tests show up as annotations on the pull request. The UI tests are built but skipped until they test more than Xcode's template.
-- **Release build** archives the Release configuration without signing, so a compile error that only happens in Release fails the pull request instead of the release. It then checks the archived app for what App Store Connect requires of a Mac upload: an icon with 512×512 and 512×512@2x images, an app category, and the export compliance answer. `ITSAppUsesNonExemptEncryption` is NO because Gauge's only encryption is HTTPS through Apple's frameworks.
+- **Release build** archives the Release configuration without signing, so a compile error that only happens in Release fails the pull request instead of the release. It then checks what App Store Connect requires of a Mac upload: every slot in the app icon set holds a PNG of the right size, 512×512 and 512×512@2x included, and the archived app carries the icon, an app category, and the export compliance answer. `ITSAppUsesNonExemptEncryption` is NO because Gauge's only encryption is HTTPS through Apple's frameworks.
 
 CI doesn't sign the app, so the tests run unsandboxed there. To run what CI runs from Terminal:
 

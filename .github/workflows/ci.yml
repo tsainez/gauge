@@ -116,45 +116,78 @@ jobs:
             COMPILER_INDEX_STORE_ENABLE=NO \
             2>&1 | xcbeautify --renderer github-actions
 
-      # App Store Connect turns away a Mac build whose .icns lacks 512x512 and
-      # 512x512@2x images (ITMS-90236) or whose Info.plist has no category
+      # App Store Connect turns away a Mac build without a complete app icon,
+      # 512x512 and 512x512@2x included (ITMS-90236), or without a category
       # (ITMS-90242), and holds every build at Missing Compliance until the
-      # encryption question is answered. Check the archived app for all three.
+      # encryption question is answered. Check the icon set, then the archived
+      # app. Xcode compiles the set into Assets.car and an .icns, and the .icns
+      # it builds for macOS 27 doesn't carry every size, so the step prints
+      # what the .icns holds rather than judging by it.
       - name: Check App Store requirements
         run: |
-          apps=("$RUNNER_TEMP"/gauge.xcarchive/Products/Applications/*.app)
-          app="${apps[0]}"
-          if [ ! -d "$app" ]; then
-            echo "::error::The archive has no app to check."
-            exit 1
-          fi
-          info() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Contents/Info.plist" 2>/dev/null || true; }
-          failed=0
+          python3 - <<'EOF'
+          import glob, json, os, plistlib, struct, sys
 
-          if [ "$(info ITSAppUsesNonExemptEncryption)" != "false" ]; then
-            echo "::error::Info.plist should set ITSAppUsesNonExemptEncryption to NO (INFOPLIST_KEY_ITSAppUsesNonExemptEncryption)."
-            failed=1
-          fi
-          if [ -z "$(info LSApplicationCategoryType)" ]; then
-            echo "::error::Info.plist has no LSApplicationCategoryType (INFOPLIST_KEY_LSApplicationCategoryType)."
-            failed=1
-          fi
+          failures = []
+          def fail(message):
+              failures.append(message)
+              print(f"::error::{message}")
 
-          icon=$(info CFBundleIconFile)
-          if [ -z "$icon" ] || [ ! -f "$app/Contents/Resources/${icon%.icns}.icns" ]; then
-            echo "::error::The app has no icon. Fill gauge/Assets.xcassets/AppIcon.appiconset."
-            failed=1
-          else
-            iconutil --convert iconset --output "$RUNNER_TEMP/AppIcon.iconset" "$app/Contents/Resources/${icon%.icns}.icns"
-            for image in icon_512x512.png icon_512x512@2x.png; do
-              if [ ! -f "$RUNNER_TEMP/AppIcon.iconset/$image" ]; then
-                echo "::error::The app icon has no $image."
-                failed=1
-              fi
-            done
-          fi
+          # Every slot in the icon set holds a PNG of the right size.
+          icon_set = "gauge/Assets.xcassets/AppIcon.appiconset"
+          with open(os.path.join(icon_set, "Contents.json")) as f:
+              images = json.load(f)["images"]
+          slots = {(image["size"], image["scale"]) for image in images}
+          for size, scale in [("512x512", "1x"), ("512x512", "2x")]:
+              if (size, scale) not in slots:
+                  fail(f"The app icon set has no {size} @{scale} slot.")
+          for image in images:
+              label = f"{image['size']} @{image['scale']}"
+              pixels = round(float(image["size"].split("x")[0]) * int(image["scale"].rstrip("x")))
+              name = image.get("filename")
+              path = os.path.join(icon_set, name) if name else None
+              if not path or not os.path.isfile(path):
+                  fail(f"The app icon has no image for {label}.")
+                  continue
+              with open(path, "rb") as f:
+                  header = f.read(24)
+              if header[:8] != b"\x89PNG\r\n\x1a\n":
+                  fail(f"{name} isn't a PNG.")
+                  continue
+              width, height = struct.unpack(">II", header[16:24])
+              if (width, height) != (pixels, pixels):
+                  fail(f"{name} is {width}x{height}; {label} needs {pixels}x{pixels}.")
 
-          if [ "$failed" -eq 0 ]; then
-            echo "App icon, category, and export compliance are all in $(basename "$app")."
-          fi
-          exit "$failed"
+          # The archived app carries the icon, a category, and the export compliance answer.
+          apps = sorted(glob.glob(os.path.join(os.environ["RUNNER_TEMP"], "gauge.xcarchive/Products/Applications/*.app")))
+          if not apps:
+              fail("The archive has no app to check.")
+          else:
+              app = apps[0]
+              with open(os.path.join(app, "Contents/Info.plist"), "rb") as f:
+                  info = plistlib.load(f)
+              if info.get("ITSAppUsesNonExemptEncryption") is not False:
+                  fail("Info.plist should set ITSAppUsesNonExemptEncryption to NO (INFOPLIST_KEY_ITSAppUsesNonExemptEncryption).")
+              if not info.get("LSApplicationCategoryType"):
+                  fail("Info.plist has no LSApplicationCategoryType (INFOPLIST_KEY_LSApplicationCategoryType).")
+              resources = os.path.join(app, "Contents/Resources")
+              icon_file = info.get("CFBundleIconFile", "")
+              icns = os.path.join(resources, os.path.splitext(icon_file)[0] + ".icns")
+              if not icon_file or not os.path.isfile(icns):
+                  fail("The archived app has no icon (CFBundleIconFile).")
+              else:
+                  with open(icns, "rb") as f:
+                      data = f.read()
+                  kinds, offset = [], 8
+                  while offset + 8 <= len(data):
+                      kind, length = struct.unpack(">4sI", data[offset:offset + 8])
+                      kinds.append(kind.decode("latin-1").strip())
+                      offset += max(length, 8)
+                  print(f"{os.path.basename(icns)} holds: {' '.join(kinds)}")
+              if info.get("CFBundleIconName") and not os.path.isfile(os.path.join(resources, "Assets.car")):
+                  fail("Info.plist names an icon in Assets.car, but the app has no Assets.car.")
+              if not failures:
+                  print(f"App icon, category, and export compliance are all in {os.path.basename(app)}.")
+
+          sys.exit(1 if failures else 0)
+          EOF
