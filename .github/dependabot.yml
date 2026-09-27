@@ -1,0 +1,11 @@
+# The workflows pin actions to commit SHAs. Dependabot moves the pins (and their
+# version comments) forward in one grouped pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
