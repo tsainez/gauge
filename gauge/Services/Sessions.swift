@@ -55,32 +55,57 @@ final class InventoryBrowser {
 @Observable
 final class CleanupSession {
     enum Step: Int, CaseIterable, Identifiable {
-        case rules = 1
-        case review
+        case review = 1
         case list
 
         var id: Int { rawValue }
 
         var title: String {
             switch self {
-            case .rules: "Set rules"
-            case .review: "Review buckets"
+            case .review: "Review"
             case .list: "List and confirm"
             }
         }
     }
 
-    var step: Step = .rules
+    var step: Step = .review
     var contextKey: String?
-    /// Items the user moved to a different bucket by hand.
+    /// Items the user moved to a different bucket by hand, by item id. Saved between launches.
     var overrides: [String: CleanupBucket] = [:]
     var run: ListingRun?
 
+    /// The bucket the list shows, and how it's narrowed and ordered.
+    var bucket: CleanupBucket = .sell
+    var search = ""
+    var filter: CleanupFilter?
+    var sort: CleanupSort = .value
+    /// Selected rows, by `CleanupRow.id`.
+    var selection: Set<String> = []
+
     func reset() {
-        step = .rules
+        step = .review
         contextKey = nil
         overrides = [:]
         run = nil
+        bucket = .sell
+        search = ""
+        filter = nil
+        selection = []
+    }
+
+    /// Call before rows leave the list. If any were selected, the row after them is
+    /// selected instead, so ↓ and ⌫ can keep working through a list.
+    func selectNext(afterRemoving removed: Set<String>, from rows: [CleanupRow]) {
+        if selection.isDisjoint(with: removed) { return }
+        selection = CleanupRow.nextID(after: removed, in: rows).map { [$0] } ?? []
+    }
+
+    /// Shows another bucket, clearing what only made sense in the last one.
+    func show(_ bucket: CleanupBucket) {
+        guard bucket != self.bucket else { return }
+        self.bucket = bucket
+        filter = nil
+        selection = []
     }
 }
 

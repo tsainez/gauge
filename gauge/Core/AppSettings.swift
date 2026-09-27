@@ -46,7 +46,7 @@ nonisolated enum RefreshInterval: Int, Codable, CaseIterable, Identifiable, Send
 /// UserDefaults. Every field decodes with a default so adding a setting never
 /// resets the others.
 nonisolated struct AppSettings: Codable, Equatable, Sendable {
-    var theme: ThemeChoice = .classic
+    var theme: ThemeChoice = .modern
     var matchSystemAppearance = false
     var currency: SteamCurrency = .usd
     var fluffThresholdCents = 5

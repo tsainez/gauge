@@ -77,6 +77,8 @@ final class AppModel {
     let browser = InventoryBrowser()
     let cleanup = CleanupSession()
     let web = SteamWebSession()
+    /// Every request to Steam this session, and the log file behind "Export log".
+    let network: NetworkActivity
 
     // MARK: Inventory
 
@@ -123,10 +125,17 @@ final class AppModel {
     static let settingsKey = "GaugeSettings"
     static let lastCheckKey = "GaugeLastInventoryCheck"
 
-    init(container: ModelContainer, defaults: UserDefaults = .standard, client: SteamClient = SteamClient()) {
+    /// - Parameter networkLog: where requests are logged; tests pass nil to keep the app's log clean.
+    init(
+        container: ModelContainer,
+        defaults: UserDefaults = .standard,
+        client: SteamClient = SteamClient(),
+        networkLog: NetworkLogFile? = NetworkLogFile.standard()
+    ) {
         self.container = container
         self.defaults = defaults
         self.client = client
+        network = NetworkActivity(file: networkLog)
         if let data = defaults.data(forKey: Self.settingsKey),
            let saved = try? JSONDecoder().decode(AppSettings.self, from: data) {
             settings = saved
@@ -134,6 +143,7 @@ final class AppModel {
             settings = AppSettings()
         }
         lastInventoryCheck = defaults.object(forKey: Self.lastCheckKey) as? Date
+        web.onActivity = { [network] event in network.record(event) }
     }
 
     var modelContext: ModelContext { container.mainContext }
@@ -152,6 +162,7 @@ final class AppModel {
 
     /// Loads the cache and starts background refresh. Safe to call more than once.
     func start() async {
+        await connectNetworkLog()
         guard !started else { return }
         started = true
         if settings.demoMode {
@@ -162,6 +173,14 @@ final class AppModel {
         // A quick look at the cookies; the first sync renews the session if it needs it.
         await web.refresh(renewIfNeeded: false)
         startScheduler()
+    }
+
+    /// Sends every request the client makes to the network log.
+    func connectNetworkLog() async {
+        let network = network
+        await client.setMonitor { event in
+            Task { @MainActor in network.record(event) }
+        }
     }
 
     func loadCache() async {
@@ -200,6 +219,7 @@ final class AppModel {
         loadSnapshots()
         rebuildDerived()
         recomputeTrends()
+        loadCleanupOverrides()
     }
 
     /// Recomputes everything derived from the item lists.
@@ -320,6 +340,31 @@ final class AppModel {
         try? context.save()
     }
 
+    /// Stars or unstars several items at once, saving once.
+    func setStarred(_ items: [InventoryItem], _ isStarred: Bool) {
+        let changing = items.filter { starred.contains($0.id) != isStarred }
+        guard !changing.isEmpty else { return }
+        guard !settings.demoMode else {
+            for item in changing {
+                if isStarred { starred.insert(item.id) } else { starred.remove(item.id) }
+            }
+            return
+        }
+        let context = modelContext
+        for item in changing {
+            let key = item.id
+            if isStarred {
+                starred.insert(key)
+                context.insert(StarredItem(key: key))
+            } else {
+                starred.remove(key)
+                let descriptor = FetchDescriptor<StarredItem>(predicate: #Predicate<StarredItem> { $0.key == key })
+                for record in (try? context.fetch(descriptor)) ?? [] { context.delete(record) }
+            }
+        }
+        try? context.save()
+    }
+
     // MARK: - Profile
 
     /// Shows the account the user just signed in to Steam with.
@@ -405,6 +450,8 @@ final class AppModel {
         try? context.delete(model: ListingRecord.self)
         try? context.save()
         defaults.removeObject(forKey: Self.lastCheckKey)
+        defaults.removeObject(forKey: Self.overridesKey)
+        network.clear()
         resetInMemoryState()
         if !keepSettings {
             settings = AppSettings()

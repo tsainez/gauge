@@ -12,6 +12,16 @@
 - [ ] If Steam's sign-in page misbehaves in `WKWebView` (for example an "unsupported browser" notice), set `applicationNameForUserAgent` to Safari's in `SteamWebSession.webViewConfiguration()`.
 - [ ] List one cheap item end to end: sign in, list, confirm in the Steam Mobile app, and see it leave the inventory.
 
+## Check on a Mac (Clean up, Portfolio, network log)
+
+- [ ] Clean up list: two-finger swipe right sells and left keeps (a full swipe acts at once), ⌫ keeps the selection and selects the next row, ⌘Z and ⇧⌘Z undo and redo from the Edit menu, and right-clicking a selection acts on all of it.
+- [ ] Drag one row, then a multi-row selection, onto each bucket tab. If a selected row drags only itself, switch to the macOS 26 multi-item drag API.
+- [ ] Rows dragged out of Gauge paste as text elsewhere. Consider an exported UTType for the payload.
+- [ ] List selection, row separators, and swipe colors under Modern and both classic themes, including with macOS in light mode.
+- [ ] Portfolio chart: axis labels fit at the window's minimum size, the hover readout stays inside the chart, and a one-day history shows its single point at the right edge.
+- [ ] Network activity: Show log file opens `~/Library/Containers/tsainez.gauge/Data/Library/Logs/Gauge`, Export log saves earlier launches too, and Console.app shows the `network` category.
+- [ ] Log artwork requests too (a custom image loader or `URLProtocol`), or keep saying they aren't listed.
+
 ## Screenshot dataset from a large public inventory
 
 The goal is a realistic, image-rich dataset for App Store screenshots.
@@ -26,7 +36,6 @@ The goal is a realistic, image-rich dataset for App Store screenshots.
 - [ ] Price history: Steam's `/market/pricehistory` needs a signed-in session. When the user is signed in, backfill 30-day trends instead of waiting for Gauge's own daily points.
 - [ ] Bulk pricing for huge inventories: page `/market/search/render?norender=1` (100 items a request) for games where the user owns a large share of the catalog.
 - [ ] Gem breakdown: "Turn into Gems" for Steam community items as a Clean up bucket. The storyboard mentions gems.
-- [ ] Undo overrides in Clean up, and remember overrides between launches.
 - [ ] Show active listings and cancel them from Gauge (`/market/mylistings`, signed in).
 - [ ] Notifications when net worth moves more than X% in a day.
 - [ ] Localize the UI, and parse prices in every Steam currency with live samples.

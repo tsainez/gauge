@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(\.openURL) private var openURL
     @State private var confirmingClear = false
     @State private var showingSignIn = false
+    @State private var problemsOnly = false
 
     var body: some View {
         let p = model.palette
@@ -29,6 +30,7 @@ struct SettingsView: View {
                         inventory(p).classicPanel(p)
                     }
                     account(p).classicPanel(p)
+                    network(p).classicPanel(p)
                     data(p).classicPanel(p)
                 }
             }
@@ -46,7 +48,7 @@ struct SettingsView: View {
             Button("Clear Local Data", role: .destructive) { clearData() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This deletes the inventory cache, prices, net worth history, stars, and the listing log. Your Steam account and items aren't affected.")
+            Text("This deletes the inventory cache, prices, net worth history, stars, clean-up choices, the listing log, and the network log. Your Steam account and items aren't affected.")
         }
     }
 
@@ -108,8 +110,8 @@ struct SettingsView: View {
                             }
                         }
                         .padding(8)
-                        .background(p.inset)
-                        .overlay(Rectangle().strokeBorder(selected ? p.accent : p.bevelDark, lineWidth: 1))
+                        .background(p.inset, in: RoundedRectangle(cornerRadius: p.corner))
+                        .overlay { RoundedRectangle(cornerRadius: p.corner).strokeBorder(selected ? p.accent : p.bevelDark, lineWidth: selected ? 1.5 : 1) }
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -267,6 +269,162 @@ struct SettingsView: View {
         return Text(text).foregroundStyle(color)
     }
 
+    // MARK: - Network
+
+    private func network(_ p: Palette) -> some View {
+        let activity = model.network
+        let total = activity.total
+        let recent = activity.events.reversed().filter { !problemsOnly || $0.isProblem }
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                SectionLabel("Network activity", p)
+                Spacer()
+                Button("Copy") { copyLog() }
+                    .classicButton(.secondary, p)
+                    .disabled(activity.events.isEmpty)
+                    .help("Copy this session's requests")
+                Button("Show log file") { revealLog() }
+                    .classicButton(.secondary, p)
+                    .disabled(activity.file == nil)
+                Button("Export log…") { exportLog() }
+                    .classicButton(.secondary, p)
+                    .help("Save every logged request, including earlier launches, as a text file")
+                Button("Clear") { activity.clear() }
+                    .classicButton(.secondary, p)
+            }
+            Text("Gauge talks to steamcommunity.com and nothing else. Logs never include your password, cookies, or session tokens.")
+                .font(p.font(11.5))
+                .foregroundStyle(p.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Since \(activity.startedAt.formatted(date: .omitted, time: .shortened)): \(total.requests.formatted()) request\(total.requests == 1 ? "" : "s") · \(ByteCountFormatter.string(fromByteCount: Int64(total.bytes), countStyle: .file)) received · \(total.problems.formatted()) with problems")
+                .font(p.font(12.5, .bold))
+
+            VStack(spacing: 0) {
+                kindRow(nil, p)
+                ForEach(NetworkEvent.Kind.allCases, id: \.self) { kind in
+                    kindRow(kind, p)
+                }
+            }
+            .classicInset(p)
+            if let queue = pricingQueueLine {
+                Text(queue)
+                    .font(p.font(11.5))
+                    .foregroundStyle(p.secondaryText)
+            }
+
+            HStack {
+                Text("Recent requests")
+                Spacer()
+                Toggle("Problems only", isOn: $problemsOnly)
+                    .toggleStyle(ClassicCheckboxStyle(palette: p))
+            }
+            .padding(.top, 4)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    if recent.isEmpty {
+                        Text(model.settings.demoMode ? "Demo mode doesn't send anything to Steam." : (problemsOnly ? "No problems this session." : "Nothing sent yet this session."))
+                            .foregroundStyle(p.mutedText)
+                            .padding(10)
+                    }
+                    ForEach(recent) { event in
+                        NetworkEventRow(event: event, palette: p)
+                    }
+                }
+            }
+            .frame(height: 230)
+            .classicInset(p)
+            Text("Item images load from Steam's image servers (community.akamai.steamstatic.com) and are cached on this Mac; they aren't listed here. The log file keeps about 2 MB, newest last.")
+                .font(p.font(11))
+                .foregroundStyle(p.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One kind of request with its totals and pace; nil draws the header.
+    private func kindRow(_ kind: NetworkEvent.Kind?, _ p: Palette) -> some View {
+        let totals = kind.flatMap { model.network.totals[$0] } ?? NetworkTotals()
+        let pace = kind.flatMap(SteamClient.Endpoint.init).map { "every \($0.interval.formatted(.number.precision(.fractionLength(0...1)))) s" } ?? "as needed"
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(kind?.title ?? "Kind")
+                if let kind {
+                    Text(kind.detail)
+                        .font(p.font(11))
+                        .foregroundStyle(p.secondaryText)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Text(kind == nil ? "Requests" : totals.requests.formatted())
+                .frame(width: 70, alignment: .trailing)
+            Text(kind == nil ? "Problems" : totals.problems.formatted())
+                .foregroundStyle(kind != nil && totals.problems > 0 ? p.negative : (kind == nil ? p.accent : p.text))
+                .frame(width: 70, alignment: .trailing)
+            Text(kind == nil ? "Average" : totals.averageDuration.map { "\($0.formatted(.number.precision(.fractionLength(2)))) s" } ?? "—")
+                .frame(width: 70, alignment: .trailing)
+            Text(kind == nil ? "Pace" : pace)
+                .frame(width: 90, alignment: .trailing)
+            Group {
+                if let kind, let resume = model.network.resumesAt(kind) {
+                    Text("Paused until \(resume.formatted(date: .omitted, time: .shortened))")
+                        .foregroundStyle(p.negative)
+                        .help("Steam asked Gauge to slow down. Requests of this kind wait until then.")
+                } else {
+                    Text(kind == nil ? "Last" : totals.lastAt.map { RelativeTime.short($0) } ?? "—")
+                }
+            }
+            .frame(width: 150, alignment: .trailing)
+        }
+        .font(p.font(12))
+        .foregroundStyle(kind == nil ? p.accent : p.text)
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .overlay(alignment: .bottom) { p.gridLine.frame(height: 1) }
+    }
+
+    private var pricingQueueLine: String? {
+        let count = model.pricingQueue.count
+        guard !model.settings.demoMode, count > 0 else { return nil }
+        let minutes = Int((Double(count) * SteamClient.Endpoint.market.interval / 60).rounded(.up))
+        return "Pricing queue: \(count.formatted()) item\(count == 1 ? "" : "s") left, about \(minutes.formatted()) min at Steam's pace."
+    }
+
+    private func copyLog() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(model.network.sessionLog, forType: .string)
+    }
+
+    private func revealLog() {
+        guard let file = model.network.file else { return }
+        if FileManager.default.fileExists(atPath: file.url.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([file.url])
+        } else {
+            let folder = file.url.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(folder)
+        }
+    }
+
+    private func exportLog() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.plainText]
+        panel.nameFieldStringValue = "Gauge network log.txt"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.1"
+        let header = """
+        Gauge network log
+        Exported \(Date().formatted(.iso8601)) · Gauge \(version) · \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Requests to Steam only. No passwords, cookies, session ids, or request bodies.
+        """
+        do {
+            try model.network.exportText(header: header).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            model.notice = "Couldn't save the log: \(error.localizedDescription)"
+        }
+    }
+
     // MARK: - Data
 
     private func data(_ p: Palette) -> some View {
@@ -341,6 +499,65 @@ struct SettingsView: View {
                 await model.syncInventories(force: true)
                 model.startScheduler()
             }
+        }
+    }
+}
+
+/// One request in the recent list: time, kind, status, timing, size, and address.
+struct NetworkEventRow: View {
+    let event: NetworkEvent
+    let palette: Palette
+
+    var body: some View {
+        let p = palette
+        HStack(spacing: 10) {
+            Text(event.startedAt.formatted(date: .omitted, time: .standard))
+                .foregroundStyle(p.secondaryText)
+                .frame(width: 84, alignment: .leading)
+            Text(event.kind.title)
+                .frame(width: 80, alignment: .leading)
+            Text(event.method)
+                .foregroundStyle(p.secondaryText)
+                .frame(width: 40, alignment: .leading)
+            Text(event.status.map(String.init) ?? "—")
+                .foregroundStyle(statusColor)
+                .frame(width: 34, alignment: .leading)
+            Text("\(event.duration.formatted(.number.precision(.fractionLength(2)))) s")
+                .frame(width: 58, alignment: .trailing)
+            Text(ByteCountFormatter.string(fromByteCount: Int64(event.bytes), countStyle: .file))
+                .foregroundStyle(p.secondaryText)
+                .frame(width: 70, alignment: .trailing)
+            if event.signedIn {
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .foregroundStyle(p.secondaryText)
+                    .help("Sent with your Steam sign-in")
+            }
+            Text(event.path)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let outcome = event.outcomeText {
+                Text(outcome)
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(p.font(11.5))
+        .foregroundStyle(p.text)
+        .monospacedDigit()
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { p.gridLine.frame(height: 1) }
+        .textSelection(.enabled)
+        .help(event.logLine)
+    }
+
+    private var statusColor: Color {
+        switch event.outcome {
+        case .ok: palette.secondaryText
+        case .rateLimited: palette.accent
+        case .failed: palette.negative
+        case .cancelled: palette.mutedText
         }
     }
 }

@@ -112,10 +112,52 @@ struct SteamClientTests {
         #expect(MockSteam.requests.last?.value(forHTTPHeaderField: "Cookie")?.contains("steamLoginSecure=76561197960287930%7C%7Ctoken") == true)
     }
 
+    @Test func reportsEveryRequestWithoutSecrets() async throws {
+        MockSteam.routes = [
+            ("/market/priceoverview/", 429, ""),
+            ("/market/sellitem/", 200, #"{"success":true,"requires_confirmation":1}"#),
+        ]
+        let client = SteamClient(configuration: MockSteam.configuration(), intervalScale: 0)
+        let recorder = EventRecorder()
+        await client.setMonitor { recorder.add($0) }
+
+        _ = try? await client.priceOverview(appID: 570, marketHashName: "A", currency: .usd)
+        let auth = SteamWebAuth(steamID64: "76561197960287930", sessionID: "secret-session", steamLoginSecure: "76561197960287930%7C%7Csecret-token")
+        _ = try await client.sell(SellRequest(appID: 570, contextID: "2", assetID: "99", amount: 1, sellerCents: 319), auth: auth)
+
+        let events = recorder.events
+        #expect(events.map(\.kind) == [.market, .sell])
+        #expect(events[0].status == 429)
+        #expect(events[0].outcome == .rateLimited(retryAfter: 60))
+        #expect(!events[0].signedIn)
+        #expect(events[1].method == "POST")
+        #expect(events[1].signedIn)
+        #expect(events[1].note == "appid=570 contextid=2 assetid=99 amount=1 price=319")
+        #expect(events.allSatisfy { !$0.logLine.contains("secret") })
+    }
+
     @Test func resolvesVanityProfiles() async throws {
         MockSteam.routes = [("/id/gaben/", 200, "<profile><steamID64>76561197960287930</steamID64><steamID><![CDATA[Rabscuttle]]></steamID><privacyState>public</privacyState></profile>")]
         let client = SteamClient(configuration: MockSteam.configuration(), intervalScale: 0)
         let profile = try await client.profile(.vanity("gaben"))
         #expect(profile.personaName == "Rabscuttle")
+    }
+}
+
+/// Collects what a SteamClient reports, from whichever thread it reports on.
+nonisolated final class EventRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [NetworkEvent] = []
+
+    func add(_ event: NetworkEvent) {
+        lock.lock()
+        stored.append(event)
+        lock.unlock()
+    }
+
+    var events: [NetworkEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
     }
 }
