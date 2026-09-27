@@ -7,6 +7,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
     @State private var input = ""
     @State private var error: String?
     @State private var working = false
@@ -53,13 +54,18 @@ struct OnboardingView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Gauge keeps your inventory, prices, and history on this Mac. It never sees your Steam password and doesn't need an API key.")
-                .font(p.font(11.5))
-                .foregroundStyle(p.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .classicInset(p)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Gauge keeps your inventory, prices, and history on this Mac. It never sees your Steam password and doesn't need an API key.")
+                    .foregroundStyle(p.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Privacy policy") { openURL(GaugeLinks.privacyPolicy) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(p.accent)
+            }
+            .font(p.font(11.5))
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .classicInset(p)
 
             HStack {
                 Button("Try the demo inventory") { model.enterDemo() }
