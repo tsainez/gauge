@@ -56,6 +56,8 @@ Settings → Network activity lists every request Gauge has made to steamcommuni
 
 Every request is also written to `~/Library/Logs/Gauge/network.log` inside the app's container (about 2 MB, with one older file kept) and to the unified log (Console.app, the app's bundle id, category `network`). **Export log…** saves the file with a short header; **Copy** copies this session's lines. Entries never include your password, cookies, session ids, or request bodies; a listing's entry names the asset and price. Item artwork loads from Steam's image servers through the shared URL cache and isn't listed.
 
+The privacy policy, [PRIVACY.md](PRIVACY.md), tells users the same. The welcome screen and Settings → About link to it, and its GitHub address is the Privacy Policy URL for App Store Connect. Keep it in step when Gauge starts storing or sending something new.
+
 ## Signing in with Steam
 
 Gauge never sees your password. **Sign in with Steam** opens Steam's own sign-in page (steamcommunity.com) in a sheet, where you use your password or scan the QR code with the Steam Mobile app. Steam Guard works as it does in a browser. Gauge then reads the session cookie Steam sets (`steamLoginSecure`) from WebKit's cookie store, which stays in the app's sandbox on your Mac. That one session:
