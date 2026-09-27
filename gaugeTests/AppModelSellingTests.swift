@@ -12,15 +12,46 @@ import Testing
 import WebKit
 @testable import gauge
 
+/// Serves canned responses for AppModelSellingTests to avoid conflicting with SteamClientTests.
+nonisolated final class SellingMockSteam: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var routes: [(match: String, status: Int, body: String)] = []
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    static let lock = NSLock()
+
+    static func configuration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SellingMockSteam.self]
+        return configuration
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url?.absoluteString ?? ""
+        Self.lock.lock()
+        Self.requests.append(request)
+        let route = Self.routes.first { url.contains($0.match) }
+        Self.lock.unlock()
+        let status = route?.status ?? 404
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data((route?.body ?? "").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 @Suite(.serialized)
 @MainActor
 struct AppModelSellingTests {
     func makeModel(_ defaults: UserDefaults) -> AppModel {
-        let configuration = MockSteam.configuration()
+        let configuration = SellingMockSteam.configuration()
         let client = SteamClient(configuration: configuration, intervalScale: 0)
         let model = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: client, networkLog: nil)
         model.updateSettings { $0.profile = DemoModeTests.profile }
-        MockSteam.routes = []
+        SellingMockSteam.routes = []
         return model
     }
 
@@ -121,7 +152,7 @@ struct AppModelSellingTests {
             model.prices[item.priceKey] = oldQuote
 
             // New price overview response (price falls to 10 cents):
-            MockSteam.routes = [
+            SellingMockSteam.routes = [
                 ("market/priceoverview", 200, #"{"success":true,"lowest_price":"$0.10","volume":"1"}"#)
             ]
 
@@ -165,7 +196,7 @@ struct AppModelSellingTests {
             model.itemsByContext = [context.id: [item]]
             model.rebuildDerived()
 
-            MockSteam.routes = [
+            SellingMockSteam.routes = [
                 ("market/sellitem", 200, #"{"success":true,"needs_mobile_confirmation":true}"#)
             ]
 
@@ -184,7 +215,7 @@ struct AppModelSellingTests {
             let model = makeModel(defaults)
             let item = CleanupPlannerTests.item("1", "Crest")
 
-            MockSteam.routes = [
+            SellingMockSteam.routes = [
                 ("market/sellitem", 429, #"null"#)
             ]
 
