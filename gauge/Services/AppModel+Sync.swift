@@ -106,8 +106,10 @@ extension AppModel {
             removeInventories(notIn: Set(refreshed.map(\.id)))
         }
         var merged = refreshed
-        for context in contexts where !merged.contains(where: { $0.id == context.id }) && itemsByContext[context.id] != nil {
+        var mergedIds = Set(merged.map(\.id))
+        for context in contexts where !mergedIds.contains(context.id) && itemsByContext[context.id] != nil {
             merged.append(context)
+            mergedIds.insert(context.id)
         }
         contexts = merged.sorted { $0.assetCount > $1.assetCount }
 
