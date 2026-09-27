@@ -385,7 +385,9 @@ struct StatusBar: View {
 
 // MARK: - Item artwork
 
-/// Steam's item image, with a rarity-tinted placeholder while it loads or when there is none.
+/// Steam's item image on a rarity-tinted gradient, with the item type's symbol
+/// in its place while it loads, if it fails, or when there is none. Steam's
+/// images have transparent backgrounds, so the symbol can't sit underneath.
 struct ItemArtwork: View {
     var item: InventoryItem
     var size: Int
@@ -393,29 +395,34 @@ struct ItemArtwork: View {
 
     var body: some View {
         ZStack {
-            placeholder
+            background
             if let url = item.imageURL(size: size) {
                 AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.15))) { phase in
                     if case .success(let image) = phase {
                         image.resizable().scaledToFit().padding(4)
+                    } else {
+                        placeholder
                     }
                 }
+            } else {
+                placeholder
             }
         }
         .clipped()
     }
 
+    private var background: some View {
+        LinearGradient(
+            colors: [palette.rarity(item).opacity(0.28), palette.raised],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
     private var placeholder: some View {
-        ZStack {
-            LinearGradient(
-                colors: [palette.rarity(item).opacity(0.28), palette.raised],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            Image(systemName: Self.symbol(for: item))
-                .font(.system(size: CGFloat(size) * 0.28, weight: .light))
-                .foregroundStyle(palette.rarity(item).opacity(0.75))
-        }
+        Image(systemName: Self.symbol(for: item))
+            .font(.system(size: CGFloat(size) * 0.28, weight: .light))
+            .foregroundStyle(palette.rarity(item).opacity(0.75))
     }
 
     static func symbol(for item: InventoryItem) -> String {
