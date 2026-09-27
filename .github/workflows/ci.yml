@@ -62,7 +62,8 @@ jobs:
             2>&1 | tee "$RUNNER_TEMP/logs/build.log" | xcbeautify --renderer github-actions
 
       # The UI tests are still Xcode's template. Drop -skip-testing once they
-      # exercise Gauge (TODO.md, Engineering).
+      # exercise Gauge (TODO.md, Engineering). --preserve-unbeautified keeps the
+      # lines xcbeautify doesn't recognize, like parameterized test results.
       - name: Run unit tests
         run: |
           xcodebuild test-without-building \
@@ -73,7 +74,7 @@ jobs:
             -resultBundlePath "$RUNNER_TEMP/gauge-tests.xcresult" \
             -skip-testing:gaugeUITests \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee "$RUNNER_TEMP/logs/test.log" | xcbeautify --renderer github-actions
+            2>&1 | tee "$RUNNER_TEMP/logs/test.log" | xcbeautify --renderer github-actions --preserve-unbeautified
 
       # The raw logs keep what xcbeautify leaves out; open the .xcresult in Xcode.
       - name: Upload logs and test results
