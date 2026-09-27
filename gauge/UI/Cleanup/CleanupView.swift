@@ -572,6 +572,8 @@ struct CleanupList: View {
                 if let url = row.item.marketURL {
                     Button("View on Market") { openURL(url) }
                 }
+                Button("Refresh Item") { Task { await model.refresh(row.item) } }
+                    .disabled(!model.canRefreshItems)
             }
         }
     }

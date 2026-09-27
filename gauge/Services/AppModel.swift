@@ -120,6 +120,8 @@ final class AppModel {
     @ObservationIgnored var priorityPriceKeys: [String] = []
     @ObservationIgnored var pricingTask: Task<Void, Never>?
     @ObservationIgnored var schedulerTask: Task<Void, Never>?
+    /// Whether this launch already checked inventories cached by an older version.
+    @ObservationIgnored var checkedOutdatedInventories = false
     @ObservationIgnored private var started = false
 
     static let settingsKey = "GaugeSettings"

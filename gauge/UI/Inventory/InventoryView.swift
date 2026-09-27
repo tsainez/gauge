@@ -432,6 +432,8 @@ struct ItemGrid: View {
                                 Button("Copy Inspect Link") { copy(link) }
                             }
                         }
+                        Button("Refresh Item") { Task { await model.refresh(item) } }
+                            .disabled(!model.canRefreshItems)
                         Button("Sell…") { onSell(item) }
                             .disabled(!item.marketable)
                     }
