@@ -351,16 +351,20 @@ final class AppModel {
             return
         }
         let context = modelContext
-        for item in changing {
-            let key = item.id
-            if isStarred {
+        if isStarred {
+            for item in changing {
+                let key = item.id
+                guard !starred.contains(key) else { continue }
                 starred.insert(key)
                 context.insert(StarredItem(key: key))
-            } else {
-                starred.remove(key)
-                let descriptor = FetchDescriptor<StarredItem>(predicate: #Predicate<StarredItem> { $0.key == key })
-                for record in (try? context.fetch(descriptor)) ?? [] { context.delete(record) }
             }
+        } else {
+            let keysToRemove = changing.map { $0.id }
+            for key in keysToRemove {
+                starred.remove(key)
+            }
+            let descriptor = FetchDescriptor<StarredItem>(predicate: #Predicate<StarredItem> { keysToRemove.contains($0.key) })
+            for record in (try? context.fetch(descriptor)) ?? [] { context.delete(record) }
         }
         try? context.save()
     }
