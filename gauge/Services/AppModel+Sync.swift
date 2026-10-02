@@ -104,8 +104,9 @@ extension AppModel {
                 refreshed.append(updated)
             } catch SteamClient.Failure.rateLimited(let wait) {
                 notice = SteamClient.Failure.rateLimited(retryAfter: wait).errorDescription
+                let refreshedIDs = Set(refreshed.map(\.id))
                 refreshed.append(contentsOf: directory.filter { candidate in
-                    !refreshed.contains { $0.id == candidate.id } && itemsByContext[candidate.id] != nil
+                    !refreshedIDs.contains(candidate.id) && itemsByContext[candidate.id] != nil
                 })
                 upgraded = false
                 break
@@ -127,8 +128,10 @@ extension AppModel {
             removeInventories(notIn: Set(refreshed.map(\.id)))
         }
         var merged = refreshed
-        for context in contexts where !merged.contains(where: { $0.id == context.id }) && itemsByContext[context.id] != nil {
+        var mergedIDs = Set(merged.map(\.id))
+        for context in contexts where !mergedIDs.contains(context.id) && itemsByContext[context.id] != nil {
             merged.append(context)
+            mergedIDs.insert(context.id)
         }
         contexts = merged.sorted { $0.assetCount > $1.assetCount }
 
