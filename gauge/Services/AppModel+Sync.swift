@@ -439,7 +439,7 @@ extension AppModel {
     /// Prices are per currency, so switching currency starts pricing over.
     func currencyChanged() {
         stopPricing()
-        for record in priceRecords.values { modelContext.delete(record) }
+        try? modelContext.delete(model: PriceRecord.self)
         try? modelContext.save()
         priceRecords = [:]
         priceHistory = [:]
