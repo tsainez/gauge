@@ -381,7 +381,30 @@ extension AppModel {
     private func runPricingQueue() async {
         pricingActive = true
         var sinceSnapshot = 0
-        while !Task.isCancelled, !pricingQueue.isEmpty {
+        var sweeps = planMarketSweeps()
+        pricing: while !Task.isCancelled {
+            // Items the user is looking at go first; then bulk sweeps; then one name at a time.
+            let urgent = pricingQueue.first.map { priorityPriceKeys.contains($0) } ?? false
+            if !urgent, !sweeps.isEmpty {
+                switch await sweepNextPage(&sweeps[0]) {
+                case .priced(let count):
+                    sinceSnapshot += count
+                    if sweeps[0].isFinished { sweeps.removeFirst() }
+                case .skipGame:
+                    sweeps.removeFirst()
+                case .stopSweeping:
+                    sweeps.removeAll()
+                case .cancelled:
+                    break pricing
+                }
+                if sinceSnapshot >= 25 {
+                    recordSnapshot()
+                    recomputeTrends()
+                    sinceSnapshot = 0
+                }
+                continue
+            }
+            guard !pricingQueue.isEmpty else { break }
             let key = pricingQueue.removeFirst()
             priorityPriceKeys.removeAll { $0 == key }
             guard let parts = PriceKey.split(key) else { continue }
@@ -422,18 +445,26 @@ extension AppModel {
 
     /// Saves a fresh quote in memory, in the day's history, and in the cache.
     func store(_ quote: PriceQuote, for key: String) {
-        prices[key] = quote
-        var history = priceHistory[key] ?? []
-        if let value = quote.valueCents {
-            history = PriceTrend.appending(value, on: Calendar.current.startOfDay(for: quote.checkedAt), to: history)
-            priceHistory[key] = history
-        }
-        if let record = priceRecords[key] {
-            record.update(quote: quote, history: history)
-        } else {
-            let record = PriceRecord(key: key, quote: quote, history: history)
-            modelContext.insert(record)
-            priceRecords[key] = record
+        store([key: quote])
+    }
+
+    /// Saves many quotes at once, with one save and one revaluation.
+    func store(_ quotes: [String: PriceQuote]) {
+        guard !quotes.isEmpty else { return }
+        for (key, quote) in quotes {
+            prices[key] = quote
+            var history = priceHistory[key] ?? []
+            if let value = quote.valueCents {
+                history = PriceTrend.appending(value, on: Calendar.current.startOfDay(for: quote.checkedAt), to: history)
+                priceHistory[key] = history
+            }
+            if let record = priceRecords[key] {
+                record.update(quote: quote, history: history)
+            } else {
+                let record = PriceRecord(key: key, quote: quote, history: history)
+                modelContext.insert(record)
+                priceRecords[key] = record
+            }
         }
         try? modelContext.save()
         recomputeValuation()
@@ -448,11 +479,85 @@ extension AppModel {
         priceHistory = [:]
         prices = [:]
         failedPriceKeys = [:]
+        marketSweptAt = [:]
+        marketSweepUnavailable = false
         loadSnapshots()
         recomputeValuation()
         recomputeTrends()
         rebuildPricingQueue()
         ensurePricing()
+    }
+
+    /// How long before a game is swept again. Names a sweep missed are priced one at a time meanwhile.
+    static let marketSweepCooldown: TimeInterval = 6 * 3_600
+
+    /// What one page of a sweep came to.
+    enum MarketSweepStep {
+        case priced(Int)
+        case skipGame
+        case stopSweeping
+        case cancelled
+    }
+
+    /// The games worth sweeping, most names first: each needs a price for at least
+    /// `MarketSweep.minimumNames` names that are new or cheap. Stale valuable items are
+    /// left to single checks, which also bring back the median sale and volume.
+    func planMarketSweeps() -> [MarketSweep] {
+        guard !marketSweepUnavailable, !settings.demoMode else { return [] }
+        let now = Date()
+        let urgent = Set(priorityPriceKeys)
+        var wanted: [Int: Set<String>] = [:]
+        for key in pricingQueue where !urgent.contains(key) {
+            if let quote = prices[key], (quote.valueCents ?? Int.max) >= settings.fluffThresholdCents { continue }
+            guard let parts = PriceKey.split(key) else { continue }
+            wanted[parts.appID, default: []].insert(parts.marketHashName)
+        }
+        return wanted
+            .filter { entry in
+                guard entry.value.count >= MarketSweep.minimumNames else { return false }
+                guard let swept = marketSweptAt[entry.key] else { return true }
+                return now.timeIntervalSince(swept) >= Self.marketSweepCooldown
+            }
+            .sorted { $0.value.count != $1.value.count ? $0.value.count > $1.value.count : $0.key < $1.key }
+            .map { MarketSweep(appID: $0.key, wanted: $0.value) }
+    }
+
+    /// Fetches the sweep's next page and stores the prices it found for wanted names.
+    func sweepNextPage(_ sweep: inout MarketSweep) async -> MarketSweepStep {
+        let currency = settings.currency
+        let page: MarketSearchPage
+        do {
+            page = try await client.marketSearch(appID: sweep.appID, start: sweep.nextStart, currency: currency)
+        } catch SteamClient.Failure.rateLimited(let wait) {
+            // The client holds the next request until the back-off passes; the same page is asked for again.
+            pricingPausedUntil = Date().addingTimeInterval(wait)
+            return .priced(0)
+        } catch {
+            if Task.isCancelled || error is CancellationError { return .cancelled }
+            // Search may be unavailable for this game; single checks still work.
+            marketSweptAt[sweep.appID] = Date()
+            return .skipGame
+        }
+        guard !Task.isCancelled, !settings.demoMode, settings.currency == currency else { return .cancelled }
+        guard page.currencyMatches else {
+            // Steam answered in another currency. Storing those prices would be wrong.
+            marketSweepUnavailable = true
+            return .stopSweeping
+        }
+        pricingPausedUntil = nil
+        let hits = sweep.absorb(page)
+        if sweep.isFinished { marketSweptAt[sweep.appID] = Date() }
+        let now = Date()
+        var quotes: [String: PriceQuote] = [:]
+        for hit in hits {
+            let key = PriceKey.make(appID: sweep.appID, marketHashName: hit.hashName)
+            quotes[key] = PriceQuote(lowestCents: hit.lowestCents, medianCents: nil, volume: nil, checkedAt: now, currency: currency)
+            failedPriceKeys[key] = nil
+        }
+        store(quotes)
+        let priced = Set(quotes.keys)
+        pricingQueue.removeAll { priced.contains($0) }
+        return .priced(quotes.count)
     }
 
     /// When the next price check can go out, if Steam asked Gauge to wait.

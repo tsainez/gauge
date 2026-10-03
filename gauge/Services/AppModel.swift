@@ -118,6 +118,10 @@ final class AppModel {
     @ObservationIgnored var failedPriceKeys: [String: Date] = [:]
     /// Keys the user is looking at right now; priced before anything else.
     @ObservationIgnored var priorityPriceKeys: [String] = []
+    /// When each game was last swept for bulk prices, so a sweep that found little isn't repeated every run.
+    @ObservationIgnored var marketSweptAt: [Int: Date] = [:]
+    /// Set when Steam's Market search answered in another currency; bulk pricing then waits for a currency change.
+    @ObservationIgnored var marketSweepUnavailable = false
     @ObservationIgnored var pricingTask: Task<Void, Never>?
     @ObservationIgnored var schedulerTask: Task<Void, Never>?
     /// Whether this launch already checked inventories cached by an older version.
@@ -479,6 +483,8 @@ final class AppModel {
         priceHistory = [:]
         failedPriceKeys = [:]
         priorityPriceKeys = []
+        marketSweptAt = [:]
+        marketSweepUnavailable = false
         contexts = []
         itemsByContext = [:]
         contextStatus = [:]
