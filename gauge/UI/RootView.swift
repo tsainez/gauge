@@ -78,6 +78,18 @@ struct HeaderBar: View {
                 ProgressView().controlSize(.small)
                 Text(label).foregroundStyle(p.secondaryText)
             }
+            if !model.settings.demoMode, model.web.isSignedIn,
+               let urlString = model.settings.profile?.avatarURL, let url = URL(string: urlString) {
+                AsyncImage(url: url) { image in
+                    image.resizable().scaledToFill()
+                } placeholder: {
+                    p.bevelDark
+                }
+                .frame(width: 22, height: 22)
+                .clipShape(Rectangle())
+                .overlay(Rectangle().stroke(p.bevelDark, lineWidth: 1))
+                .help("Signed in to Steam")
+            }
             if let name = model.settings.demoMode ? DemoData.personaName : model.settings.profile?.personaName {
                 Text(name).foregroundStyle(p.text.opacity(0.9))
             }
