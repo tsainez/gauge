@@ -4,6 +4,9 @@
 //
 
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import SwiftData
 import Testing
 @testable import gauge
@@ -119,6 +122,38 @@ struct MarketSweepTests {
     }
 }
 
+/// Serves canned responses for the sweep tests. Separate from the other suites' mocks,
+/// whose shared routes would be swapped out from under them while suites run in parallel.
+final class SweepMockSteam: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var routes: [(match: String, status: Int, body: String)] = []
+    nonisolated(unsafe) static var requests: [URLRequest] = []
+    static let lock = NSLock()
+
+    static func configuration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [SweepMockSteam.self]
+        return configuration
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url?.absoluteString ?? ""
+        Self.lock.lock()
+        Self.requests.append(request)
+        let route = Self.routes.first { url.contains($0.match) }
+        Self.lock.unlock()
+        let status = route?.status ?? 404
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data((route?.body ?? "").utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 /// The sweep inside the pricing queue, against a mocked Steam.
 @Suite(.serialized)
 @MainActor
@@ -136,7 +171,7 @@ struct MarketSweepPricingTests {
     func makeModel(items: [InventoryItem]) async -> (AppModel, UserDefaults, String) {
         let suite = "GaugeTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
-        let client = SteamClient(configuration: AppModelMockSteam.configuration(), intervalScale: 0)
+        let client = SteamClient(configuration: SweepMockSteam.configuration(), intervalScale: 0)
         let model = AppModel(container: GaugeSchema.makeContainer(inMemory: true), defaults: defaults, client: client, networkLog: nil)
         model.contexts = [Self.context]
         await model.store(items, for: Self.context)
@@ -145,16 +180,16 @@ struct MarketSweepPricingTests {
     }
 
     func route(_ routes: [(match: String, status: Int, body: String)]) {
-        AppModelMockSteam.lock.lock()
-        AppModelMockSteam.requests = []
-        AppModelMockSteam.routes = routes
-        AppModelMockSteam.lock.unlock()
+        SweepMockSteam.lock.lock()
+        SweepMockSteam.requests = []
+        SweepMockSteam.routes = routes
+        SweepMockSteam.lock.unlock()
     }
 
     var marketRequests: [String] {
-        AppModelMockSteam.lock.lock()
-        defer { AppModelMockSteam.lock.unlock() }
-        return AppModelMockSteam.requests.compactMap { $0.url?.absoluteString }.filter { $0.contains("/market/") }
+        SweepMockSteam.lock.lock()
+        defer { SweepMockSteam.lock.unlock() }
+        return SweepMockSteam.requests.compactMap { $0.url?.absoluteString }.filter { $0.contains("/market/") }
     }
 
     @Test func sweepPricesMostNamesInOneRequest() async throws {
