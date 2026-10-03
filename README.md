@@ -4,6 +4,21 @@ A macOS companion for the Steam Community Market. It shows what your marketable 
 
 The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so the app never uses "Steam" in its own name.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/1-portfolio.png" alt="Portfolio: marketable net worth, a month of daily history, each game's value, and the most valuable items, price moves, and most copies" width="900">
+</p>
+
+| | |
+| --- | --- |
+| <img src="docs/screenshots/2-inventory.png" alt="Inventory: a Counter-Strike 2 grid sorted by float, with tag filters and a Nova skin's float, pattern, and prices in the detail panel"> | <img src="docs/screenshots/3-cleanup.png" alt="Clean up: rules on the left, the Sell bucket with 1,372 items, and a row swiped to show Star and Keep"> |
+| **Inventory.** Filter by Steam's own tags, sort CS2 skins by float, and see each item's prices. | **Clean up.** Rules fill the Sell bucket; swipe, drag, or press ⌫ to move items. |
+| <img src="docs/screenshots/4-cleanup-worth-a-look.png" alt="Clean up: the Worth a look bucket with four items selected and their combined payout"> | <img src="docs/screenshots/5-settings.png" alt="Settings in the Classic theme: appearance, pricing, inventory checks, Steam account, and network activity"> |
+| **Worth a look.** Pricier items wait here until you decide. | **Settings.** Classic, Classic Dark, and Modern themes, pricing, and refresh intervals. |
+| <img src="docs/screenshots/6-network-activity.png" alt="Network activity in the Modern theme: requests per kind, pace, and a log of recent requests to Steam"> | |
+| **Network activity.** Every request Gauge sends to Steam, with its pace and an exportable log. | |
+
 ## What's in the MVP
 
 | Tab | What it does |
@@ -12,6 +27,16 @@ The working title is Steam Gauge. It will ship on the App Store as **Gauge**, so
 | **Inventory** | A grid like Steam's inventory page with filters built from Steam's own tags (rarity, quality, type, slot, hero, and so on), search, sort by value, rarity, name, or newest, stars, multi-select (⌘-click, ⇧-click), set ownership ("you own 3 of 5"), and a Sell sheet. Right-click an item and choose **Refresh Item** to fetch it and its price from Steam again. Counter-Strike 2 skins show their float, pattern, and stickers, and sort by float (see [Counter-Strike 2 skins](#counter-strike-2-skins)). |
 | **Clean up** | Rules on the left pick what to sell: **extra copies** (keep one of each), **cheap items** (under $0.10 by default), and optionally everything else. Starred items are always kept, anything worth $5 or more waits in **Worth a look**, and set pieces and rising prices are Advanced options. The list shows one bucket at a time (**Sell**, **Worth a look**, **Keep**) with each item's artwork, reasons, and payout; search, filter by reason, and sort it. Move items by swiping a row (right to sell, left to keep), pressing ⌫, dragging rows onto a bucket, or from the selection bar, and undo with ⌘Z. Moves are remembered between launches. The inspector shows the selected item large, with its prices and where its copies are. For CS2 skins, the copy kept is the lowest float, and low floats and skins with stickers wait in Worth a look. Then list the Sell bucket a few at a time. |
 | **Settings** | Modern (the default), Classic, and Classic Dark themes (or Classic by day and Classic Dark by night), currency, fluff threshold, refresh intervals, a menu bar net worth, a Steam account section, **network activity** (every request to Steam, Steam's pacing and back-off, and an exportable log), CSV export, and clearing local data. |
+
+<p align="center">
+  <img src="docs/screenshots/details/cleanup-swipe.png" alt="A Clean up row swiped left to show Star and Keep" width="640"><br>
+  <sub>Swipe a row in Clean up to star it, keep it, or sell it.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/details/themes.png" alt="The Classic, Classic Dark, and Modern theme swatches in Settings" width="640"><br>
+  <sub>Three themes, or Classic by day and Classic Dark by night.</sub>
+</p>
 
 **Demo mode** loads a deterministic 3,029-item Dota 2 inventory, plus Steam, TF2, CS2 (including skins with floats, patterns, stickers, and Doppler phases), and others, with prices and 150 days of history. Nothing is sent to Steam. Use it for development, previews, and screenshots. Demo data lives only in memory, so your own profile's cache is untouched. To leave demo mode, use **Exit demo** next to the DEMO DATA badge in the header, the button in Settings → Steam account, or Inventory → Exit Demo Mode in the menu bar. You go back to your saved profile, or to the profile prompt if you haven't added one. Every tab also has an Xcode preview (`gauge/UI/PreviewSupport.swift`).
 
@@ -51,9 +76,17 @@ Steam rate-limits anonymous traffic heavily. Price checks top out at about 20 a 
 - **An update can ask for one more download.** When a new version reads more out of an inventory than the last (CS2 floats, for one), inventories it cached before are downloaded once more when it launches, rather than at the next scheduled check. With inventory checks set to Manually, that waits for ⌘R.
 - **Daily snapshots** of net worth are upserted as prices arrive and stored per currency. They draw the Portfolio chart.
 
+<p align="center">
+  <img src="docs/screenshots/details/portfolio-chart.png" alt="The Portfolio chart: marketable net worth over the month, drawn from daily snapshots" width="560">
+</p>
+
 ## Seeing what Gauge sends
 
 Settings → Network activity lists every request Gauge has made to steamcommunity.com this session: when, what kind (prices, inventories, profiles, listings, sign-in renewals), the address, the status, how long it waited in Gauge's own queue, how long Steam took, and how much came back. It also shows each kind's pace and whether Steam has asked Gauge to wait.
+
+<p align="center">
+  <img src="docs/screenshots/details/network-activity.png" alt="Network activity: requests, problems, average time, and pace for prices, inventories, profiles, listings, and sign-in" width="720">
+</p>
 
 Every request is also written to `~/Library/Logs/Gauge/network.log` inside the app's container (about 2 MB, with one older file kept) and to the unified log (Console.app, the app's bundle id, category `network`). **Export log…** saves the file with a short header; **Copy** copies this session's lines. Entries never include your password, cookies, session ids, or request bodies; a listing's entry names the asset and price. Item artwork loads from Steam's image servers through the shared URL cache and isn't listed.
 
@@ -71,6 +104,10 @@ The sheet shows the page's real address, and only Steam's sign-in pages open in 
 
 ## Selling, and why it's safe
 
+<p align="center">
+  <img src="docs/screenshots/details/cleanup-review-listings.png" alt="The bottom of Clean up: 1,372 items to list, a note that listings are confirmed in the Steam Mobile app, and a Review listings button" width="640">
+</p>
+
 - Every listing still has to be confirmed in the **Steam Mobile app**. Nothing sells without your approval there.
 - Clean up only sells what a rule picks or you move there yourself. Out of the box that's extra copies and items under $0.10; everything else stays in Keep.
 - Starred items are never listed (Settings → Protect starred items).
@@ -82,6 +119,10 @@ The sheet shows the page's real address, and only Steam's sign-in pages open in 
 ## Counter-Strike 2 skins
 
 Every copy of a CS2 skin has the same Market name and price, but not the same value. Its float (how worn it is), its pattern, and what's applied to it tell copies apart. Steam includes these in the inventory itself, so Gauge shows them without extra requests or a third-party inspect service.
+
+<p align="center">
+  <img src="docs/screenshots/details/skin-details.png" alt="Counter-Strike 2 skins sorted by float, each tile showing its float and pattern, with a Nova's float bar, pattern, finish, and origin in the detail panel" width="800">
+</p>
 
 - **Where they come from.** Each CS2 item in `/inventory/` arrives with `asset_properties`: its Wear Rating (the float), Pattern Template, Charm Template (for charms), and Item Certificate. The certificate is the same encoded preview block a CS2 inspect link carries. Gauge decodes it on your Mac (`ItemCertificate`) for the finish's paint index, the StatTrak count, name tag, and origin, and every sticker's scrape and charm's pattern. Sticker and charm names come from the item's description.
 - **Inventory.** Tiles show the float and pattern, plus a Doppler's phase, which the Market name leaves out. The detail panel shows the whole float on a bar of the five exteriors, then the pattern, finish, StatTrak count, name tag, origin, stickers, and charm. Sort by Float, type `#661` in search to find a pattern or `0.00` to find floats that start with those digits, and right-click a skin to copy its float or inspect link. If a skin shows no float, right-click it and choose Refresh Item; the status bar then says how many of the game's items came back with a float.
