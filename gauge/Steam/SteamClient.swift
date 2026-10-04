@@ -201,6 +201,30 @@ actor SteamClient {
         }
     }
 
+    /// One page of a game's Market listings, cheapest first: up to 100 items' lowest
+    /// listings for the cost of one request. No login needed. Shares the market gate
+    /// with `priceOverview`, so sweeping never makes Gauge ask Steam for more.
+    func marketSearch(appID: Int, start: Int, currency: SteamCurrency) async throws -> MarketSearchPage {
+        var components = URLComponents(string: "https://steamcommunity.com/market/search/render/")!
+        components.queryItems = [
+            URLQueryItem(name: "norender", value: "1"),
+            URLQueryItem(name: "appid", value: String(appID)),
+            URLQueryItem(name: "start", value: String(start)),
+            URLQueryItem(name: "count", value: String(MarketSweep.pageSize)),
+            URLQueryItem(name: "sort_column", value: "price"),
+            URLQueryItem(name: "sort_dir", value: "asc"),
+            URLQueryItem(name: "search_descriptions", value: "0"),
+            URLQueryItem(name: "currency", value: String(currency.rawValue)),
+            URLQueryItem(name: "l", value: "english"),
+        ]
+        let data = try await send(URLRequest(url: components.url!), endpoint: .market)
+        do {
+            return try MarketSearchParser.parse(data, currency: currency)
+        } catch {
+            throw Failure.unreadable
+        }
+    }
+
     /// Lists one item on the Community Market. Steam then asks for confirmation in the mobile app.
     func sell(_ sell: SellRequest, auth: SteamWebAuth) async throws -> SellResult {
         var request = URLRequest(url: URL(string: "https://steamcommunity.com/market/sellitem/")!)

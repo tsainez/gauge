@@ -50,7 +50,8 @@ The goal is a realistic, image-rich dataset for App Store screenshots.
 ## Product
 
 - [ ] Price history: Steam's `/market/pricehistory` needs a signed-in session. When the user is signed in, backfill 30-day trends instead of waiting for Gauge's own daily points.
-- [ ] Bulk pricing for huge inventories: page `/market/search/render?norender=1` (100 items a request) for games where the user owns a large share of the catalog.
+- [x] Bulk pricing for huge inventories: page `/market/search/render?norender=1` (100 items a request), cheapest first, and stop when it stops paying off (`MarketSweep`).
+- [ ] Check bulk pricing against real Steam: that `search/render` honors `currency` (Gauge falls back to single checks when it doesn't), how far `start` can page before Steam stops answering, and whether search has its own, stricter rate limit than `priceoverview`.
 - [ ] Gem breakdown: "Turn into Gems" for Steam community items as a Clean up bucket. The storyboard mentions gems.
 - [ ] Show active listings and cancel them from Gauge (`/market/mylistings`, signed in).
 - [ ] CS2 float ranges per finish (from the item schema), so a low float is measured against what that finish can reach rather than its whole exterior.
